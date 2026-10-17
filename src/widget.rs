@@ -100,6 +100,7 @@ pub struct Widget {
     pub size: Size,
     pub bounds: Option<Rect>,
     pub disabled: bool,
+    pub sound: crate::SoundFeedback,
     /// One vertical scroll viewport may be mounted in a Ui.
     pub scrollable: bool,
     pub live_tile: Option<LiveTile>,
@@ -118,6 +119,7 @@ impl Widget {
             size: Size::default(),
             bounds: None,
             disabled: false,
+            sound: crate::SoundFeedback::Auto,
             scrollable: false,
             live_tile: None,
             tooltip,
@@ -291,6 +293,10 @@ impl Widget {
     }
     pub fn grow(mut self) -> Self {
         self.size.grow = 1.;
+        self
+    }
+    pub fn sound(mut self, feedback: crate::SoundFeedback) -> Self {
+        self.sound = feedback;
         self
     }
     pub fn disabled(mut self, disabled: bool) -> Self {

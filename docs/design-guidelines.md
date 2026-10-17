@@ -94,3 +94,7 @@ Remove decoration that does not help a decision or action. Keep empty space when
 ## Colour scheme content
 
 Colour ribbons are content selectors: their multicolour samples do not relax the single-accent rule for UI chrome. Use paired carets outside samples, named schemes and hex values so selection never relies on hue alone. Companion squares preview application-defined palette roles; keep those meanings stable and show only the roles the user will apply. Preserve 48 pixel targets along the strip and allow overflow rather than compressing targets. Use the ribbon for continuity and swatches for separation, with the same keyboard and accessibility behavior in either orientation. See [colour picker guidelines](color-picker.md).
+
+## Sound as confirmation
+
+Use a small, quiet family of tactile sounds for committed local state and deliberate transitions. Do not add sounds to hover, typing, scrolling, MIDI or every continuous value change. An activation click confirms input, while completion/failure requires an explicit domain result and a visible explanation. Keep sound off by default, provide volume and essential-only modes, and preserve user choice independently of motion preferences. [Sound design and research](sound.md) documents the acoustic specification, evidence and listening checklist.

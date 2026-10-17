@@ -16,6 +16,7 @@ It uses the same public widgets, fonts, renderer and host as an application buil
 | tiles | Static and live tiles, horizontal/vertical meters, determinate/indeterminate progress, selectable and reorderable lists |
 | overlays | Dialog, context menu, filtered command palette, notification, tooltip, aligned dropdown |
 | motion | Interruptible switches and value changes, colour selection, page transitions, reduced-motion control and motion debug shortcuts |
+| sound | Opt-in feedback, essential/subtle modes, volume, all eight cue auditions, device status and contextual interactions |
 | layout | Four pixel rhythm, differently sized tiles, stack/row composition and the responsive twelve-column grid |
 
 Each page scrolls independently on entry. The top pivot includes the library's previous-page mouse affordance when an earlier title is clipped. Resize the window to inspect compact layouts. The **Dark / light** action changes the surface while keeping the selected UI accent.
@@ -34,3 +35,5 @@ For motion inspection, use Ctrl/Cmd + Shift + S to slow the clock, Ctrl/Cmd + Sh
 The catalogue includes a small custom text specimen. It obtains its resolved rectangle and clipping area with `Ui::widget_geometry`, paints `Primitive::Text` with a changing weight, and returns `true` from `Application::needs_frame` only while that tween is active. This is also the pattern for application-owned animations: sample the shared `ui.clock`, respect motion preferences, and stop requesting frames at rest. Keep blocking work out of `paint`, `view` and `event`.
 
 The synth demo and MIDI controls demonstrate UI and parameter binding; neither example supplies an audio engine. To exercise MIDI learn without hardware, applications can send `Input::Midi` through the host's `InputSender`.
+
+To audition sound, use `cargo run --example showcase -- --page sound --sound`. Export reproducible WAVs without opening a device with `cargo run --example showcase -- --export-sounds target/sounds`. See [sound design and research](sound.md).

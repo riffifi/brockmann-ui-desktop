@@ -5,7 +5,12 @@ edition = "2024"
 license = "MIT"
 description = "A native Metro and Swiss modernist UI toolkit"
 
+[features]
+default = ["sound"]
+sound = ["dep:cpal"]
+
 [dependencies]
+cpal = { version = "0.16", optional = true }
 wgpu = "25.0.2"
 winit = "0.30.13"
 cosmic-text = "0.19.0"

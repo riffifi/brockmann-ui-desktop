@@ -11,7 +11,7 @@ use brockmann::{
     widget::{ButtonStyle, Kind},
     *,
 };
-const PAGES: [&str; 7] = [
+const PAGES: [&str; 8] = [
     "colour",
     "controls",
     "typography",
@@ -19,6 +19,7 @@ const PAGES: [&str; 7] = [
     "overlays",
     "motion",
     "layout",
+    "sound",
 ];
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|s| s.to_string()).collect()
@@ -56,6 +57,10 @@ struct Showcase {
     item: usize,
     order: Vec<usize>,
     status: String,
+    sound_enabled: bool,
+    sound_essential: bool,
+    sound_volume: f64,
+    feedback_status: SoundStatus,
 }
 impl Default for Showcase {
     fn default() -> Self {
@@ -83,6 +88,10 @@ impl Default for Showcase {
             item: 0,
             order: vec![0, 1, 2],
             status: "Ready / every control is interactive".into(),
+            sound_enabled: false,
+            sound_essential: false,
+            sound_volume: 35.,
+            feedback_status: SoundStatus::Disabled,
         }
     }
 }
@@ -116,6 +125,120 @@ impl Showcase {
         theme.reduce_motion = self.reduced;
         theme.tilt = ui.theme.tilt;
         ui.set_theme(theme);
+    }
+    fn sound_settings(&self, ui: &mut Ui) {
+        ui.sound = SoundSettings {
+            mode: if !self.sound_enabled {
+                SoundMode::Off
+            } else if self.sound_essential {
+                SoundMode::Essential
+            } else {
+                SoundMode::Subtle
+            },
+            volume: (self.sound_volume / 100.) as f32,
+        };
+    }
+    fn sounds(&self) -> Vec<Widget> {
+        let mut rows = vec![
+            heading("sound-heading", "a quieter interface"),
+            note(
+                "sound-note",
+                "Dry clicks and rounded pops. Enable sound, then audition each cue.",
+            ),
+            Widget::toggle("sound-enabled", "Interaction sounds", self.sound_enabled)
+                .sound(SoundFeedback::Silent),
+            Widget::toggle(
+                "sound-essential",
+                "Essential cues only",
+                self.sound_essential,
+            )
+            .sound(SoundFeedback::Silent),
+            Widget::slider(
+                "sound-volume",
+                "Sound level",
+                self.sound_volume,
+                0.,
+                100.,
+                35.,
+            ),
+            note(
+                "audio-status",
+                &format!("Output / {:?}", self.feedback_status),
+            ),
+            note(
+                "sound-policy",
+                "Essential: switches and explicit outcomes. Subtle adds selections and layers.",
+            ),
+            heading("cue-heading", "the sound family"),
+        ];
+        for cue in SoundCue::ALL {
+            rows.push(
+                Widget::row(
+                    Id::from(format!("sound-row-{}", cue.name()).as_str()),
+                    vec![
+                        button(format!("audition-{}", cue.name()).as_str(), cue.name())
+                            .width(160.)
+                            .sound(SoundFeedback::Silent),
+                        Widget::label(
+                            Id::from(format!("sound-note-{}", cue.name()).as_str()),
+                            format!(
+                                "{} ms / {}",
+                                cue.duration_ms(),
+                                if cue.essential() {
+                                    "essential"
+                                } else {
+                                    "subtle"
+                                }
+                            ),
+                            TypeRole::MonoValue,
+                        )
+                        .grow(),
+                    ],
+                )
+                .height(40.),
+            );
+        }
+        rows.extend([
+            heading("sound-try", "try it in context"),
+            Widget::toggle("toggle", "A committed switch change", self.toggled),
+            Widget::picker(
+                "output",
+                "A dropdown selection",
+                strings(&[
+                    "Built-in audio",
+                    "Studio monitors",
+                    "Headphones",
+                    "USB interface",
+                    "Network output",
+                ]),
+                self.output,
+            ),
+            Widget::slider(
+                "amount",
+                "This continuous control stays silent",
+                self.amount,
+                0.,
+                100.,
+                50.,
+            ),
+            Widget::row(
+                "sound-results",
+                vec![
+                    button("sound-confirm", "Confirm completion").sound(SoundFeedback::Silent),
+                    button("sound-reject", "Explain a failure").sound(SoundFeedback::Silent),
+                ],
+            )
+            .height(48.),
+            note(
+                "silent-note",
+                "Typing, hover, scrolling, MIDI, and intermediate drag updates stay silent.",
+            ),
+            note(
+                "sound-docs",
+                "Research, cue specifications and integration: docs/sound.md",
+            ),
+        ]);
+        rows
     }
     fn colour(&self) -> Vec<Widget> {
         let mut rows = vec![
@@ -663,6 +786,10 @@ impl Application for Showcase {
     fn configure(&mut self, ui: &mut Ui) {
         self.reduced |= ui.theme.reduce_motion;
         self.theme(ui);
+        self.sound_settings(ui);
+    }
+    fn update(&mut self, ui: &mut Ui) {
+        self.feedback_status = ui.sound_status;
     }
     fn needs_frame(&self, ui: &Ui) -> bool {
         self.page == 2 && self.weight.active(ui.clock.now()) && !ui.clock.paused
@@ -676,7 +803,8 @@ impl Application for Showcase {
             3 => self.tiles(),
             4 => self.overlays(),
             5 => self.motion(),
-            _ => self.layout(),
+            6 => self.layout(),
+            _ => self.sounds(),
         };
         let available = (v.w - margin * 2.).clamp(0., 960.);
         for row in &mut rows {
@@ -780,6 +908,14 @@ impl Application for Showcase {
                     self.selected = n;
                     self.status = ColorPicker::metro().schemes[n].description();
                 }
+                Value::Bool(b) if id == Id::from("sound-enabled") => {
+                    self.sound_enabled = b;
+                    self.sound_settings(ui);
+                }
+                Value::Bool(b) if id == Id::from("sound-essential") => {
+                    self.sound_essential = b;
+                    self.sound_settings(ui);
+                }
                 Value::Bool(b) if id == Id::from("vertical") => self.vertical = b,
                 Value::Bool(b) if id == Id::from("swatches") => self.swatches = b,
                 Value::Bool(b) if id == Id::from("reduce-motion") => {
@@ -788,6 +924,10 @@ impl Application for Showcase {
                 }
                 Value::Bool(b) if id == Id::from("running") => self.running = b,
                 Value::Bool(b) => self.toggled = b,
+                Value::Number(n) if id == Id::from("sound-volume") => {
+                    self.sound_volume = n;
+                    self.sound_settings(ui);
+                }
                 Value::Number(n) if id == Id::from("weight") => {
                     self.weight_target = n;
                     self.weight.retarget(
@@ -804,6 +944,33 @@ impl Application for Showcase {
                 Value::Text(text) => self.text = text,
             },
             Event::Click(id) => match id {
+                id if SoundCue::ALL
+                    .iter()
+                    .any(|cue| id == Id::from(format!("audition-{}", cue.name()).as_str())) =>
+                {
+                    let cue = SoundCue::ALL
+                        .into_iter()
+                        .find(|cue| id == Id::from(format!("audition-{}", cue.name()).as_str()))
+                        .unwrap();
+                    ui.play_sound(cue);
+                    self.status = if ui.sound.allows(cue) {
+                        format!("Audition / {}", cue.name())
+                    } else {
+                        "Muted by sound settings / enable subtle mode to hear every cue".into()
+                    };
+                }
+                id if id == Id::from("sound-confirm") => {
+                    ui.play_sound(SoundCue::Confirm);
+                    ui.notify("Operation completed");
+                }
+                id if id == Id::from("sound-reject") => {
+                    ui.play_sound(SoundCue::Reject);
+                    ui.show_dialog(
+                        "could not save",
+                        "This is a demonstration. Check the output path and try again.",
+                        strings(&["close"]),
+                    );
+                }
                 id if id == Id::from("theme") => {
                     self.light = !self.light;
                     self.theme(ui);
@@ -838,6 +1005,7 @@ impl Application for Showcase {
                     "overlays",
                     "motion",
                     "layout",
+                    "sound",
                 ])),
                 id if id == Id::from("toast") => {
                     ui.notify("Session saved / changes are up to date")
@@ -912,6 +1080,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .position(|p| p == page)
             .ok_or("unknown showcase page")?;
+    }
+    app.sound_enabled = args.iter().any(|s| s == "--sound");
+    if let Some(directory) = option("--export-sounds") {
+        std::fs::create_dir_all(directory)?;
+        let mut sequence = Vec::new();
+        for cue in SoundCue::ALL {
+            let samples = brockmann::sound::synthesize(cue, 48000)?
+                .into_iter()
+                .map(|s| s * 0.35)
+                .collect::<Vec<_>>();
+            brockmann::sound::write_wav(
+                std::path::Path::new(directory).join(format!("{}.wav", cue.name())),
+                &samples,
+                48000,
+            )?;
+            sequence.extend_from_slice(&samples);
+            sequence.resize(sequence.len() + 33600, 0.);
+        }
+        brockmann::sound::write_wav(
+            std::path::Path::new(directory).join("preview.wav"),
+            &sequence,
+            48000,
+        )?;
+        eprintln!("Exported eight cues and preview.wav to {directory}");
+        return Ok(());
     }
     app.vertical = args.iter().any(|s| s == "--vertical");
     app.swatches = args.iter().any(|s| s == "--swatches");

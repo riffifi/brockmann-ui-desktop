@@ -13,6 +13,7 @@ struct Demo {
     accent: usize,
     enabled: bool,
     motion: bool,
+    feedback: bool,
     tilt: bool,
     velocity: bool,
     name: String,
@@ -26,7 +27,7 @@ impl Default for Demo {
     fn default() -> Self {
         Self {
             page:0, synth:0, light:false, accent:0, enabled:true,
-            motion:true, tilt:true, velocity:true, name:"studio".into(),
+            motion:true, feedback:false, tilt:true, velocity:true, name:"studio".into(),
             values:[60.,420.,24.,12.], kit:0, editor_file:0,
             kit_code: "pub struct Kit {\n    pub name: String,\n}\n".into(),
             code:"fn main() {\n    let kit = Kit::new(\"studio\");\n    kit.kick().tone(60.0).decay(420.0);\n    kit.play();\n}\n".into(),
@@ -45,6 +46,11 @@ impl Application for Demo {
         theme.text_scale = ui.theme.text_scale;
         theme.tilt = ui.theme.tilt;
         ui.set_theme(theme);
+        ui.sound.mode = if self.feedback {
+            SoundMode::Subtle
+        } else {
+            SoundMode::Off
+        };
     }
     fn title(&self) -> &str {
         "Brockmann"
@@ -81,6 +87,8 @@ impl Application for Demo {
                         vec![
                             Widget::toggle("enabled", "Audio engine", self.enabled),
                             Widget::toggle("velocity", "Velocity sensitivity", self.velocity),
+                            Widget::toggle("feedback", "Interaction sounds", self.feedback)
+                                .sound(SoundFeedback::Silent),
                             Widget::toggle("motion", "Motion", self.motion),
                             Widget::toggle("tilt", "Press tilt", self.tilt),
                             Widget::picker(
@@ -269,6 +277,7 @@ impl Application for Demo {
                     Value::Selection(n) if id == Id::from("accent") => self.accent = n,
                     Value::Bool(v) if id == Id::from("enabled") => self.enabled = v,
                     Value::Bool(v) if id == Id::from("velocity") => self.velocity = v,
+                    Value::Bool(v) if id == Id::from("feedback") => self.feedback = v,
                     Value::Bool(v) if id == Id::from("motion") => self.motion = v,
                     Value::Bool(v) if id == Id::from("tilt") => self.tilt = v,
                     Value::Number(v) => {
@@ -297,6 +306,11 @@ impl Application for Demo {
                 theme.reduce_motion = !self.motion;
                 theme.tilt = self.tilt;
                 ui.set_theme(theme);
+                ui.sound.mode = if self.feedback {
+                    SoundMode::Subtle
+                } else {
+                    SoundMode::Off
+                };
             }
             Event::Click(id) if id == Id::from("commands") => ui.command_palette(strings(&[
                 "settings",

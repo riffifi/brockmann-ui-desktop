@@ -223,3 +223,7 @@ Read `docs/design-guidelines.md` in the source checkout for composition and inte
 `Widget::color_picker` adds horizontal or vertical ribbons and swatches with zero to three companion accents per scheme. Changes use `Value::Selection`; applications retain ownership of the palette and selected index. See [`color_picker`](crate::color_picker) for the public types and `docs/color-picker.md` in the checkout for examples and interaction guidelines.
 
 Run `cargo run --example showcase` to explore every widget, type role, all five Pixel fonts, variable font weights, overlays, palette variants and motion. See `docs/showcase.md` for page selection and snapshot options.
+
+## Optional interaction sound
+
+Sound stays off until the application sets `ui.sound.mode` to `SoundMode::Essential` or `SoundMode::Subtle`. The host provides asynchronous device setup, a small synthesized click/pop family and semantic routing, while continuous controls and editing stay silent. Explicit success/failure cues come from `Ui::play_sound`, after the result is known. See [`sound`](crate::sound) for research, mappings, configuration and audio-engine integration. Audition the family with `cargo run --example showcase -- --page sound --sound`.

@@ -235,6 +235,10 @@ pub struct DebugOptions {
 pub struct Ui {
     pub clock: Clock,
     pub theme: Theme,
+    /// Optional feedback. Off by default, independent of reduced motion.
+    pub sound: crate::SoundSettings,
+    pub sound_status: crate::SoundStatus,
+    sound_requests: crate::sound::SoundRequests,
     previous_theme: Theme,
     theme_at: f64,
     nodes: Vec<Node>,
@@ -282,6 +286,9 @@ impl Ui {
             previous_theme: theme.clone(),
             theme,
             theme_at: -1.,
+            sound: crate::SoundSettings::default(),
+            sound_status: crate::SoundStatus::Disabled,
+            sound_requests: crate::sound::SoundRequests::default(),
             nodes: vec![],
             states: BTreeMap::new(),
             focus: None,
@@ -327,6 +334,31 @@ impl Ui {
         let t = ((self.clock.now() - self.theme_at) / 0.2).clamp(0., 1.) as f32;
         self.previous_theme.mix(&self.theme, t)
     }
+    /// Request an explicit outcome cue after the app knows the operation's result.
+    /// Requests coalesce; global mute and essential-only policy always win.
+    pub fn play_sound(&mut self, cue: crate::SoundCue) {
+        if self.sound.allows(cue) {
+            self.sound_requests.push(cue);
+        }
+    }
+    /// Custom hosts may consume semantic feedback and render it in their own engine.
+    pub fn take_sound(&mut self) -> Option<crate::SoundCue> {
+        self.sound_requests.take(self.sound)
+    }
+    fn widget_sound(&mut self, id: Id, automatic: crate::SoundCue) {
+        use crate::SoundFeedback;
+        let cue = self
+            .node(id)
+            .filter(|n| n.w.interactive())
+            .and_then(|n| match n.w.sound {
+                SoundFeedback::Silent => None,
+                SoundFeedback::Auto => Some(automatic),
+                SoundFeedback::Cue(cue) => Some(cue),
+            });
+        if let Some(cue) = cue {
+            self.play_sound(cue);
+        }
+    }
     pub fn drain_events(&mut self) -> impl Iterator<Item = Event> + '_ {
         self.events.drain(..)
     }
@@ -362,6 +394,11 @@ impl Ui {
         });
     }
     fn open(&mut self, kind: Overlay) {
+        if let Overlay::Picker { owner, .. } = &kind {
+            self.widget_sound(*owner, crate::SoundCue::Open);
+        } else {
+            self.play_sound(crate::SoundCue::Open);
+        }
         self.input(Input::Cancel);
         self.closing_popup = None;
         let selected = if let Overlay::Picker { selected, .. } = &kind {
@@ -391,6 +428,13 @@ impl Ui {
     }
     fn close_popup(&mut self, selection: Option<usize>) {
         if let Some(p) = self.popup.take() {
+            if let Overlay::Picker { owner, .. } = &p.kind {
+                if selection.is_none() {
+                    self.widget_sound(*owner, crate::SoundCue::Close);
+                }
+            } else {
+                self.play_sound(crate::SoundCue::Close);
+            }
             self.focus = p.previous_focus;
             if !matches!(p.kind, Overlay::Menu { .. }) {
                 let now = self.clock.now();
@@ -661,6 +705,7 @@ impl Ui {
         let Some(s) = self.states.get_mut(&id) else {
             return;
         };
+        let old_model = s.model;
         let n = match value {
             Value::Bool(v) => Some(u8::from(v) as f64),
             Value::Number(v) => Some(v),
@@ -680,6 +725,24 @@ impl Ui {
                 s.value = Tween::new(n, n, now, 0., Curve::Linear)
             }
         }
+        if let Some(n) = n
+            && let Some(node) = self.node(id)
+        {
+            let cue = match node.w.kind {
+                Kind::Toggle { .. } => Some(if n >= 0.5 {
+                    crate::SoundCue::ToggleOn
+                } else {
+                    crate::SoundCue::ToggleOff
+                }),
+                Kind::Picker { .. } | Kind::Choice { .. } => Some(crate::SoundCue::Select),
+                _ => None,
+            };
+            if old_model != n
+                && let Some(cue) = cue
+            {
+                self.widget_sound(id, cue);
+            }
+        }
         self.events.push(Event::Changed(id, value));
     }
     fn activate(&mut self, id: Id) {
@@ -688,6 +751,15 @@ impl Ui {
             return;
         }
         let value = self.states[&id].model;
+        if matches!(
+            n.w.kind,
+            Kind::Button {
+                style: ButtonStyle::Primary
+            }
+        ) || matches!(n.w.sound, crate::SoundFeedback::Cue(_))
+        {
+            self.widget_sound(id, crate::SoundCue::Activate);
+        }
         match n.w.kind {
             Kind::Toggle { .. } => self.change(id, Value::Bool(value < 0.5), true),
             Kind::Picker { options, .. } => self.open(Overlay::Picker {
@@ -971,6 +1043,7 @@ impl Ui {
                             && i != self.states[&id].model as usize
                         {
                             self.change(id, Value::Selection(i), true);
+                            self.widget_sound(id, crate::SoundCue::Select);
                         }
                         self.touch_start = None;
                     }
@@ -1034,7 +1107,9 @@ impl Ui {
                     last: p,
                     last_at: now,
                     velocity: 0.,
-                    value: if double {
+                    value: if matches!(n.w.kind, Kind::ColorPicker { .. }) {
+                        self.states[&id].model
+                    } else if double {
                         v
                     } else {
                         self.states[&id].value.sample(now).0
@@ -1056,6 +1131,12 @@ impl Ui {
                 if let Some(d) = self.drag.take()
                     && let Some(n) = self.node(d.id)
                 {
+                    if d.moved
+                        && matches!(n.w.kind, Kind::ColorPicker { .. })
+                        && self.states[&d.id].model != d.value
+                    {
+                        self.widget_sound(d.id, crate::SoundCue::Select);
+                    }
                     if d.thumb {
                         let v = self.states[&d.id].value.sample(now).0;
                         let on = if d.velocity.abs() > 600. {
@@ -1305,6 +1386,7 @@ impl Ui {
             };
             if next != current {
                 self.change(id, Value::Selection(next), true);
+                self.widget_sound(id, crate::SoundCue::Select);
             }
             return;
         }
@@ -3620,6 +3702,12 @@ impl Ui {
                         .is_some_and(|n| matches!(n.w.kind, Kind::ColorPicker { .. })))
             {
                 self.change(owner, Value::Selection(index), true);
+                if self
+                    .node(owner)
+                    .is_some_and(|n| matches!(n.w.kind, Kind::ColorPicker { .. }))
+                {
+                    self.widget_sound(owner, crate::SoundCue::Select);
+                }
             }
             return;
         }

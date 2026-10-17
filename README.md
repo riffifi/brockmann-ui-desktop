@@ -97,3 +97,5 @@ This is an initial toolkit implementation. The provided spec has no reference sc
 Fonts retain their SIL OFL license in `assets/fonts/OFL.txt`. Icon sources retain the MIT license in `assets/icons/LICENSE`. See `LICENSE` for toolkit code.
 
 Run the complete interactive component catalogue with `cargo run --example showcase`. It includes colour ribbons and swatches, all controls, typography, overlays and motion examples. See [the showcase guide](docs/showcase.md) and [colour picker usage](docs/color-picker.md).
+
+Optional, research-informed UI sound uses a quiet synthesized click/pop family with selective routing and user-controlled mute/volume. Audition it with `cargo run --example showcase -- --page sound --sound`; see [sound design and research](docs/sound.md). The default `sound` feature adds CPAL output; `--no-default-features` keeps synthesis/export and removes native playback.

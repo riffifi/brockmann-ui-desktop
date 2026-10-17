@@ -99,3 +99,7 @@ This is an initial toolkit. It does not open audio or MIDI devices, implement a 
 `Widget::color_picker(id, label, ColorPicker, selected)` presents named schemes as a ribbon or spaced swatches. `Orientation` chooses horizontal/vertical layout; `CompanionCount` chooses zero through three accent previews. It emits `Value::Selection`, supports pointer scrubbing, wheel, arrows, Home/End, and accessible radio options. Selection markers travel for 180 ms; reduced motion crossfades. See [the colour picker guide](color-picker.md) for complete examples, overflow and theme application.
 
 The [component library app](showcase.md) demonstrates every component interactively.
+
+## Interaction sound
+
+Widgets use selective semantic feedback when global sound is enabled. Use `.sound(SoundFeedback::Silent)` to suppress a widget or `.sound(SoundFeedback::Cue(cue))` to override an activation cue. Global Off/Essential/Subtle modes apply throughout. Continuous controls, hover and text editing stay silent. Explicit results use `Ui::play_sound`; see [sound design and research](sound.md).

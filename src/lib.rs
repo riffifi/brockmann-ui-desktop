@@ -12,6 +12,7 @@ pub mod layout;
 pub mod render;
 pub mod runtime;
 pub mod scene;
+pub mod sound;
 pub mod text;
 pub mod theme;
 pub mod ui;
@@ -20,6 +21,7 @@ pub use color_picker::{ColorPicker, ColorPickerVariant, ColorScheme, CompanionCo
 pub use geometry::{Point, Rect};
 pub use render::Renderer;
 pub use runtime::{Application, InputSender, run};
+pub use sound::{SoundCue, SoundFeedback, SoundMode, SoundSettings, SoundStatus};
 pub use theme::{Accent, Theme};
 pub use ui::{Event, Input, Ui};
 pub use widget::{Id, Widget};

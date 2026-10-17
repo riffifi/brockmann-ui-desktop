@@ -90,6 +90,10 @@ struct Host<A> {
     redraw: bool,
     ui_wakeup: Option<Instant>,
     trace_frames: bool,
+    #[cfg(feature = "sound")]
+    audio: Option<crate::sound::SoundOutput>,
+    #[cfg(feature = "sound")]
+    audio_attempted: bool,
 }
 impl<A: Application> Host<A> {
     fn new(app: A, proxy: EventLoopProxy<HostEvent>) -> Self {
@@ -109,9 +113,14 @@ impl<A: Application> Host<A> {
             redraw: true,
             ui_wakeup: None,
             trace_frames: std::env::var_os("BROCKMANN_TRACE_FRAMES").is_some(),
+            #[cfg(feature = "sound")]
+            audio: None,
+            #[cfg(feature = "sound")]
+            audio_attempted: false,
         }
     }
     fn rebuild(&mut self) {
+        self.feedback();
         let Some(w) = &self.window else { return };
         let scale = w.window.scale_factor() as f32;
         let viewport = Rect::new(
@@ -161,6 +170,48 @@ impl<A: Application> Host<A> {
         let events = self.ui.drain_events().collect::<Vec<_>>();
         for e in events {
             self.app.event(e, &mut self.ui);
+        }
+    }
+    fn feedback(&mut self) {
+        let cue = self.ui.take_sound();
+        #[cfg(feature = "sound")]
+        {
+            let enabled = self.ui.sound.mode != crate::SoundMode::Off && self.ui.sound.gain() > 0.;
+            if !enabled {
+                self.audio_attempted = false;
+            }
+            if enabled && self.audio.is_none() && !self.audio_attempted {
+                self.audio_attempted = true;
+                let proxy = self.proxy.clone();
+                self.audio = crate::sound::SoundOutput::new(move || {
+                    let _ = proxy.send_event(HostEvent::Input(Input::Refresh));
+                })
+                .ok();
+            }
+            if let Some(audio) = &mut self.audio {
+                audio.sync(self.ui.sound, cue);
+                self.ui.sound_status = if enabled {
+                    audio.status()
+                } else {
+                    crate::SoundStatus::Disabled
+                };
+            } else {
+                self.ui.sound_status = if enabled {
+                    crate::SoundStatus::Unavailable
+                } else {
+                    crate::SoundStatus::Disabled
+                };
+            }
+        }
+        #[cfg(not(feature = "sound"))]
+        {
+            let _ = cue;
+            self.ui.sound_status =
+                if self.ui.sound.mode == crate::SoundMode::Off || self.ui.sound.gain() == 0. {
+                    crate::SoundStatus::Disabled
+                } else {
+                    crate::SoundStatus::NotBuilt
+                };
         }
     }
     fn tick(&mut self) {
@@ -456,6 +507,7 @@ impl<A: Application> ApplicationHandler<HostEvent> for Host<A> {
             self.rebuild();
             self.redraw = true;
         }
+        self.feedback();
         if let Some(w) = &self.window {
             if self.ui.needs_frame() || self.app.needs_frame(&self.ui) || self.redraw {
                 w.window.request_redraw();
