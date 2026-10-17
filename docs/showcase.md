@@ -13,13 +13,13 @@ It uses the same public widgets, fonts, renderer and host as an application buil
 | colour | Horizontal/vertical ribbon and swatches; zero to three companions; custom and disabled palettes; apply a selected scheme |
 | controls | Switches, three button styles, sliders, bipolar values, knobs, MIDI learn, editable and error inputs, dropdowns, tabs, pivots, every icon |
 | typography | Every type role, Geist Sans/Mono and all five Pixel cuts; a live 100–900 weight slider and animated weight presets |
-| tiles | Static and live tiles, horizontal/vertical meters, determinate/indeterminate progress, selectable and reorderable lists |
+| tiles | Static and live tiles, horizontal/vertical meters, determinate/indeterminate progress, selectable lists and reorderable lists/tiles |
 | overlays | Dialog, context menu, filtered command palette, notification, tooltip, aligned dropdown |
 | motion | Interruptible switches and value changes, colour selection, page transitions, reduced-motion control and motion debug shortcuts |
 | sound | Opt-in feedback, essential/subtle modes, volume, all eight cue auditions, device status and contextual interactions |
 | layout | Four pixel rhythm, differently sized tiles, stack/row composition and the responsive twelve-column grid |
 
-Each page scrolls independently on entry. The top pivot includes the library's previous-page mouse affordance when an earlier title is clipped. Resize the window to inspect compact layouts. The **Dark / light** action changes the surface while keeping the selected UI accent.
+Each page scrolls independently on entry. The top pivot retains earlier titles; click them directly or pan a narrow strip to reach overflow. Resize the window to inspect compact layouts. The **Dark / light** action changes the surface while keeping the selected UI accent.
 
 ```sh
 cargo run --example showcase -- --page typography
@@ -37,3 +37,5 @@ The catalogue includes a small custom text specimen. It obtains its resolved rec
 The synth demo and MIDI controls demonstrate UI and parameter binding; neither example supplies an audio engine. To exercise MIDI learn without hardware, applications can send `Input::Midi` through the host's `InputSender`.
 
 To audition sound, use `cargo run --example showcase -- --page sound --sound`. Export reproducible WAVs without opening a device with `cargo run --example showcase -- --export-sounds target/sounds`. See [sound design and research](sound.md).
+
+For a reproducible drag frame: `cargo run --example showcase -- --page tiles --scroll 700 --drag list-0:list-1 --snapshot target/reorder.png`. Snapshot drag mode processes the reorder event and captures the neighbours during their 200 ms transition.

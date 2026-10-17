@@ -745,68 +745,10 @@ fn compact_picker_stays_a_bounded_full_page_list() {
     );
 }
 
-fn accessible_button_bounds(ui: &Ui, label: &str) -> Rect {
-    let tree = ui.accessibility_tree(1.);
-    let (_, node) = tree
-        .nodes
-        .iter()
-        .find(|(_, n)| n.role() == accesskit::Role::Button && n.label() == Some(label))
-        .unwrap();
-    let b = node.bounds().unwrap();
-    Rect::new(
-        b.x0 as f32,
-        b.y0 as f32,
-        (b.x1 - b.x0) as f32,
-        (b.y1 - b.y0) as f32,
-    )
-}
 #[test]
-fn screen_and_instrument_pivots_have_separate_mouse_previous_targets() {
-    let view = Rect::new(0., 0., 1100., 800.);
-    let mut root = Widget::column(
-        "root",
-        vec![
-            Widget::choice(
-                "pages",
-                vec!["settings".into(), "drum synth".into(), "editor".into()],
-                1,
-                true,
-            )
-            .at(Rect::new(48., 64., 1052., 56.)),
-            Widget::choice(
-                "drums",
-                vec!["kick".into(), "snare".into(), "hat".into()],
-                2,
-                true,
-            )
-            .at(Rect::new(48., 152., 1052., 56.)),
-        ],
-    );
-    root.layout = brockmann::layout::Layout::Overlay;
-    let mut ui = Ui::default();
-    ui.reconcile(root, view);
-    let screen_back = accessible_button_bounds(&ui, "previous: settings");
-    assert!(screen_back.w >= 40. && screen_back.h >= 40.);
-    assert!(screen_back.right() <= 48.);
-    let point = screen_back.center();
-    down(&mut ui, point.x, point.y);
-    assert_eq!(
-        events(&mut ui),
-        vec![Event::Changed(Id::from("pages"), Value::Selection(0))]
-    );
-    ui.input(Input::Up(point));
-    let instrument_back = accessible_button_bounds(&ui, "previous: snare");
-    let point = instrument_back.center();
-    down(&mut ui, point.x, point.y);
-    assert_eq!(
-        events(&mut ui),
-        vec![Event::Changed(Id::from("drums"), Value::Selection(1))]
-    );
-}
-#[test]
-fn pivot_previous_keeps_title_axis_and_has_accessible_action_and_tooltip() {
-    let mut ui = Ui::default();
+fn pivots_keep_previous_options_visible_and_clickable_without_arrows() {
     let bounds = Rect::new(48., 64., 800., 56.);
+    let mut ui = Ui::default();
     ui.reconcile(
         Widget::choice(
             "pages",
@@ -817,84 +759,65 @@ fn pivot_previous_keeps_title_axis_and_has_accessible_action_and_tooltip() {
         .at(bounds),
         Rect::new(0., 0., 900., 600.),
     );
-    assert_eq!(text_bounds(&ui.scene(), "editor").x, bounds.x);
-    let back = accessible_button_bounds(&ui, "previous: synth");
-    ui.input(Input::Move(back.center()));
-    ui.advance(0.7);
-    assert!(
-        ui.scene()
-            .draws
-            .iter()
-            .any(|d| matches!(&d.primitive,Primitive::Text{text,..} if text=="previous: synth"))
-    );
-    let tree = ui.accessibility_tree(1.);
-    let (id, _) = tree
-        .nodes
-        .iter()
-        .find(|(_, n)| n.label() == Some("previous: synth"))
-        .unwrap();
-    ui.accessibility_action(accesskit::ActionRequest {
-        action: accesskit::Action::Click,
-        target_tree: accesskit::TreeId::ROOT,
-        target_node: *id,
-        data: None,
-    });
-    assert_eq!(
-        events(&mut ui),
-        vec![Event::Changed(Id::from("pages"), Value::Selection(1))]
-    );
-}
-#[test]
-fn compact_pivot_previous_uses_its_own_lane_without_hiding_active_title() {
-    let mut ui = Ui::default();
-    let bounds = Rect::new(24., 64., 376., 56.);
-    ui.reconcile(
-        Widget::choice(
-            "tabs",
-            vec!["kick".into(), "snare".into(), "hat".into()],
-            1,
-            true,
-        )
-        .at(bounds),
-        Rect::new(0., 0., 400., 300.),
-    );
-    let back = accessible_button_bounds(&ui, "previous: kick");
-    assert!(back.x >= bounds.x && back.right() <= bounds.right());
-    assert!(back.w >= 40.);
+    ui.advance(1.);
     let scene = ui.scene();
-    let title = text_draw(&scene, "snare");
-    assert_eq!(text_bounds(&scene, "snare").x, bounds.x);
-    assert!(title.clip.right() < back.x);
-    let point = back.center();
-    down(&mut ui, point.x, point.y);
-    assert_eq!(
-        events(&mut ui),
-        vec![Event::Changed(Id::from("tabs"), Value::Selection(0))]
-    );
-}
-#[test]
-fn first_and_disabled_pivots_do_not_respond_to_previous_mouse_control() {
-    let view = Rect::new(0., 0., 900., 600.);
-    let mut ui = Ui::default();
-    ui.reconcile(
-        Widget::choice("tabs", vec!["kick".into(), "snare".into()], 0, true)
-            .at(Rect::new(48., 64., 800., 56.)),
-        view,
-    );
+    assert_eq!(text_bounds(&scene, "settings").x, bounds.x);
+    assert!(text_bounds(&scene, "synth").x > bounds.x);
+    assert!(text_bounds(&scene, "editor").right() <= bounds.right());
     assert!(
         !ui.accessibility_tree(1.)
             .nodes
             .iter()
             .any(|(_, n)| n.label().is_some_and(|s| s.starts_with("previous:")))
     );
-    ui.reconcile(
-        Widget::choice("tabs", vec!["kick".into(), "snare".into()], 1, true)
-            .disabled(true)
-            .at(Rect::new(48., 64., 800., 56.)),
-        view,
+    let point = text_bounds(&scene, "synth").center();
+    down(&mut ui, point.x, point.y);
+    assert_eq!(
+        events(&mut ui),
+        vec![Event::Changed(Id::from("pages"), Value::Selection(1))]
     );
-    ui.advance(0.3);
-    let point = accessible_button_bounds(&ui, "previous: kick").center();
+}
+#[test]
+fn compact_pivot_reveals_only_necessary_overflow_and_trackpad_pans_back() {
+    let bounds = Rect::new(24., 64., 300., 56.);
+    let mut ui = Ui::default();
+    ui.reconcile(
+        Widget::choice(
+            "pages",
+            vec![
+                "settings".into(),
+                "instruments".into(),
+                "editor".into(),
+                "history".into(),
+            ],
+            3,
+            true,
+        )
+        .at(bounds),
+        VIEW,
+    );
+    ui.advance(1.);
+    let scene = ui.scene();
+    assert!(text_bounds(&scene, "history").right() <= bounds.right() + 0.01);
+    // It is aligned to the trailing edge, rather than hiding every predecessor.
+    assert!(text_bounds(&scene, "history").x > bounds.x + 24.);
+    ui.input(Input::Move(bounds.center()));
+    ui.input(Input::Scroll {
+        delta: Point::new(1000., 0.),
+        phase: brockmann::ui::ScrollPhase::Move,
+    });
+    assert_eq!(text_bounds(&ui.scene(), "settings").x, bounds.x);
+    assert!(events(&mut ui).is_empty());
+}
+#[test]
+fn disabled_pivot_options_remain_visible_but_ignore_clicks() {
+    let mut ui = Ui::default();
+    ui.reconcile(
+        Widget::choice("pages", vec!["kick".into(), "snare".into()], 1, true).disabled(true),
+        VIEW,
+    );
+    ui.advance(1.);
+    let point = text_bounds(&ui.scene(), "kick").center();
     down(&mut ui, point.x, point.y);
     assert!(events(&mut ui).is_empty());
 }
@@ -1110,28 +1033,27 @@ fn closing_during_opening_keeps_current_panel_and_dim_layer() {
 }
 
 #[test]
-fn touching_a_visible_pivot_chevron_does_not_move_its_target() {
+fn touch_selects_the_previous_title_at_its_existing_position() {
     let mut ui = Ui::default();
-    let view = Rect::new(0., 0., 1100., 800.);
     ui.reconcile(
         Widget::choice(
-            "tabs",
+            "pages",
             vec!["kick".into(), "snare".into(), "hat".into()],
             1,
             true,
-        )
-        .at(Rect::new(48., 64., 1052., 56.)),
-        view,
+        ),
+        VIEW,
     );
-    let visible = accessible_button_bounds(&ui, "previous: kick");
+    ui.advance(1.);
+    let point = text_bounds(&ui.scene(), "kick").center();
     ui.input(Input::Down {
-        position: visible.center(),
+        position: point,
         button: PointerButton::Primary,
         touch: true,
     });
     assert_eq!(
         events(&mut ui),
-        vec![Event::Changed(Id::from("tabs"), Value::Selection(0))]
+        vec![Event::Changed(Id::from("pages"), Value::Selection(0))]
     );
 }
 
@@ -1176,7 +1098,7 @@ fn color_picker_hit_targets_and_selection_match_in_all_variants() {
                     } else {
                         cell.w
                     },
-                    48.
+                    picker.cell_extent()
                 );
                 down(&mut ui, cell.center().x, cell.center().y);
                 assert_eq!(
@@ -1316,12 +1238,10 @@ fn color_picker_marker_retargets_without_a_position_jump_and_settles() {
         ui.scene()
             .draws
             .into_iter()
-            .filter_map(|d| {
-                if let Primitive::Triangle { points, .. } = d.primitive {
-                    Some(points)
-                } else {
-                    None
-                }
+            .filter_map(|d| match d.primitive {
+                Primitive::Triangle { points, .. } => Some(points),
+                Primitive::Line { from, to, .. } => Some([from, to, from]),
+                _ => None,
             })
             .collect::<Vec<_>>()
     };
@@ -1390,12 +1310,10 @@ fn reduced_motion_color_picker_crossfades_stationary_markers() {
         .scene()
         .draws
         .into_iter()
-        .filter_map(|d| {
-            if let Primitive::Triangle { points, .. } = d.primitive {
-                Some((points, d.transform.opacity))
-            } else {
-                None
-            }
+        .filter_map(|d| match d.primitive {
+            Primitive::Triangle { points, .. } => Some((points, d.transform.opacity)),
+            Primitive::Line { from, to, .. } => Some(([from, to, from], d.transform.opacity)),
+            _ => None,
         })
         .collect::<Vec<_>>();
     ui.advance(0.02);
@@ -1403,12 +1321,10 @@ fn reduced_motion_color_picker_crossfades_stationary_markers() {
         .scene()
         .draws
         .into_iter()
-        .filter_map(|d| {
-            if let Primitive::Triangle { points, .. } = d.primitive {
-                Some((points, d.transform.opacity))
-            } else {
-                None
-            }
+        .filter_map(|d| match d.primitive {
+            Primitive::Triangle { points, .. } => Some((points, d.transform.opacity)),
+            Primitive::Line { from, to, .. } => Some(([from, to, from], d.transform.opacity)),
+            _ => None,
         })
         .collect::<Vec<_>>();
     assert!(!a.is_empty());
@@ -1422,7 +1338,258 @@ fn reduced_motion_color_picker_crossfades_stationary_markers() {
         ui.scene()
             .draws
             .iter()
-            .filter(|d| matches!(d.primitive, Primitive::Triangle { .. }))
+            .filter(|d| matches!(
+                d.primitive,
+                Primitive::Triangle { .. } | Primitive::Line { .. }
+            ))
             .all(|d| d.transform.opacity == 1.)
     );
+}
+
+#[test]
+fn precise_trackpad_pixels_preserve_acceleration_and_do_not_add_second_inertia() {
+    let mut ui = Ui::default();
+    let make = || {
+        Widget::column(
+            "scroll",
+            (0..20)
+                .map(|i| {
+                    Widget::label(Id::from(format!("r{i}").as_str()), "Row", TypeRole::Body)
+                        .height(48.)
+                })
+                .collect(),
+        )
+        .scrollable()
+    };
+    ui.reconcile(make(), VIEW);
+    ui.input(Input::Move(Point::new(300., 300.)));
+    for (delta, phase) in [
+        (-0.75, brockmann::ui::ScrollPhase::Start),
+        (-2.25, brockmann::ui::ScrollPhase::Move),
+        (-12., brockmann::ui::ScrollPhase::Move),
+        (-35., brockmann::ui::ScrollPhase::Move),
+        (0., brockmann::ui::ScrollPhase::End),
+    ] {
+        ui.input(Input::Scroll {
+            delta: Point::new(0., delta),
+            phase,
+        });
+    }
+    assert_eq!(ui.scroll.offset, 50.);
+    ui.advance(0.5);
+    assert_eq!(ui.scroll.offset, 50.);
+    ui.touchpad_gain = 2.;
+    ui.input(Input::Scroll {
+        delta: Point::new(0., -10.),
+        phase: brockmann::ui::ScrollPhase::Move,
+    });
+    assert_eq!(ui.scroll.offset, 70.);
+    assert!(events(&mut ui).is_empty());
+}
+#[test]
+fn compact_tile_values_and_labels_have_separate_text_rectangles() {
+    for height in [40., 48., 72., 96., 200.] {
+        let mut ui = Ui::default();
+        ui.reconcile(
+            Widget::new(
+                "tile",
+                "one unit",
+                brockmann::widget::Kind::Tile {
+                    value: "96".into(),
+                    active: true,
+                },
+            )
+            .at(Rect::new(24., 24., 96., height)),
+            VIEW,
+        );
+        ui.advance(1.);
+        let scene = ui.scene();
+        let value = text_bounds(&scene, "96");
+        let label = text_bounds(&scene, "one unit");
+        let overlap = value.intersect(label);
+        assert!(
+            overlap.w == 0. || overlap.h == 0.,
+            "tile height {height}: {value:?} / {label:?}"
+        );
+        assert!(value.bottom() <= 24. + height && label.bottom() <= 24. + height);
+    }
+}
+#[test]
+fn dragged_rows_follow_pointer_flat_and_neighbours_animate_into_their_new_slots() {
+    use brockmann::widget::Kind;
+    let make = |order: &[usize]| {
+        Widget::column(
+            "list",
+            order
+                .iter()
+                .map(|i| {
+                    Widget::new(
+                        Id::from(format!("item{i}").as_str()),
+                        format!("Row {i}"),
+                        Kind::ListItem {
+                            selected: false,
+                            secondary: "Detail".into(),
+                        },
+                    )
+                    .height(72.)
+                })
+                .collect(),
+        )
+    };
+    let mut ui = Ui::default();
+    ui.reconcile(make(&[0, 1, 2]), VIEW);
+    ui.advance(1.);
+    let start = Point::new(120., 36.);
+    down(&mut ui, start.x, start.y);
+    events(&mut ui);
+    ui.input(Input::Move(Point::new(120., 130.)));
+    assert!(events(&mut ui).contains(&Event::Reorder {
+        item: Id::from("item0"),
+        before: Id::from("item1")
+    }));
+    ui.reconcile(make(&[1, 0, 2]), VIEW);
+    let scene = ui.scene();
+    let moved = text_draw(&scene, "Row 0");
+    assert_eq!(
+        (moved.transform.rotate_x, moved.transform.rotate_y),
+        (0., 0.)
+    );
+    assert!((text_bounds(&scene, "Row 0").y + moved.transform.y - 102.).abs() < 0.01);
+    let sibling = text_draw(&scene, "Row 1");
+    assert!(sibling.transform.y > 0.);
+    ui.advance(0.08);
+    assert!(text_draw(&ui.scene(), "Row 1").transform.y < sibling.transform.y);
+    ui.input(Input::Up(Point::new(120., 130.)));
+    let dropped = ui.scene();
+    let drop = text_draw(&dropped, "Row 0");
+    assert!(drop.transform.y > 0.);
+    ui.advance(0.3);
+    assert_eq!(text_draw(&ui.scene(), "Row 0").transform.y, 0.);
+}
+#[test]
+fn reorderable_tiles_follow_the_same_drag_path_and_do_not_reorder_other_groups() {
+    use brockmann::widget::Kind;
+    let tile = |id, label| {
+        Widget::new(
+            id,
+            label,
+            Kind::Tile {
+                value: "01".into(),
+                active: false,
+            },
+        )
+        .height(96.)
+        .width(96.)
+        .reorderable(true)
+    };
+    let root = Widget::column(
+        "root",
+        vec![
+            Widget::row("group-a", vec![tile("a", "A"), tile("b", "B")]).height(96.),
+            Widget::row("group-b", vec![tile("c", "C"), tile("d", "D")]).height(96.),
+        ],
+    );
+    let mut ui = Ui::default();
+    ui.reconcile(root, VIEW);
+    ui.advance(1.);
+    down(&mut ui, 48., 48.);
+    events(&mut ui);
+    ui.input(Input::Move(Point::new(172., 48.)));
+    assert!(events(&mut ui).contains(&Event::Reorder {
+        item: Id::from("a"),
+        before: Id::from("b")
+    }));
+    ui.input(Input::Move(Point::new(172., 152.)));
+    assert!(
+        !events(&mut ui)
+            .iter()
+            .any(|e| matches!(e, Event::Reorder { .. }))
+    );
+}
+
+#[test]
+fn touch_reorder_waits_for_hold_and_remains_captured_after_long_press() {
+    let mut ui = Ui::default();
+    let make = || {
+        Widget::column(
+            "list",
+            (0..4)
+                .map(|i| {
+                    Widget::new(
+                        Id::from(format!("r{i}").as_str()),
+                        format!("Row {i}"),
+                        brockmann::widget::Kind::ListItem {
+                            selected: false,
+                            secondary: "".into(),
+                        },
+                    )
+                    .height(72.)
+                })
+                .collect(),
+        )
+        .scrollable()
+    };
+    ui.reconcile(make(), VIEW);
+    ui.advance(1.);
+    ui.input(Input::Down {
+        position: Point::new(100., 36.),
+        button: PointerButton::Primary,
+        touch: true,
+    });
+    events(&mut ui);
+    ui.advance(0.6);
+    assert!(
+        !events(&mut ui)
+            .iter()
+            .any(|e| matches!(e, Event::Context(..)))
+    );
+    ui.input(Input::Move(Point::new(100., 124.)));
+    assert!(events(&mut ui).contains(&Event::Reorder {
+        item: Id::from("r0"),
+        before: Id::from("r1")
+    }));
+}
+#[test]
+fn faithful_ribbon_fits_the_spectrum_inside_a_framed_dense_strip() {
+    let picker = ColorPicker::windows8();
+    assert_eq!(picker.schemes.len(), 32);
+    let bounds = Rect::new(24., 24., 772., 96.);
+    assert_eq!(picker.cell_extent(), 24.);
+    let first = picker.cell_bounds(bounds, 0., 0);
+    let last = picker.cell_bounds(bounds, 0., 31);
+    assert_eq!(first.x, bounds.x + 2.);
+    assert_eq!(last.right(), bounds.right() - 2.);
+    let swatches = picker.clone().variant(ColorPickerVariant::Swatches);
+    assert_eq!(swatches.cell_extent(), 48.);
+    let mut ui = Ui::default();
+    ui.reconcile(
+        Widget::color_picker("palette", "Scheme", picker, 0).at(bounds),
+        Rect::new(0., 0., 900., 200.),
+    );
+    ui.advance(1.);
+    assert_eq!(
+        ui.scene()
+            .draws
+            .iter()
+            .filter(|d| matches!(d.primitive, Primitive::Line { .. }))
+            .count(),
+        6,
+        "two hollow triangular markers"
+    );
+}
+
+#[test]
+fn every_windows8_colour_has_legible_selected_text_in_both_themes() {
+    for light in [false, true] {
+        for scheme in ColorPicker::windows8().schemes {
+            let theme = Theme::new(light, Accent::Teal).with_accent(scheme.primary);
+            let text = theme.accent_text();
+            assert!(
+                text.contrast(theme.bg) >= 4.4999 && text.contrast(theme.surface) >= 4.4999,
+                "{} / light {light}",
+                scheme.name
+            );
+            assert_eq!(theme.accent, scheme.primary);
+        }
+    }
 }

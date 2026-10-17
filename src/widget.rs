@@ -100,6 +100,8 @@ pub struct Widget {
     pub size: Size,
     pub bounds: Option<Rect>,
     pub disabled: bool,
+    /// Reorder siblings by dragging; list items opt in by default.
+    pub reorderable: bool,
     pub sound: crate::SoundFeedback,
     /// One vertical scroll viewport may be mounted in a Ui.
     pub scrollable: bool,
@@ -111,6 +113,7 @@ impl Widget {
     pub fn new(id: impl Into<Id>, label: impl Into<String>, kind: Kind) -> Self {
         let label = label.into();
         let tooltip = matches!(kind, Kind::IconButton { .. }).then(|| label.clone());
+        let reorderable = matches!(kind, Kind::ListItem { .. });
         Self {
             id: id.into(),
             label,
@@ -119,6 +122,7 @@ impl Widget {
             size: Size::default(),
             bounds: None,
             disabled: false,
+            reorderable,
             sound: crate::SoundFeedback::Auto,
             scrollable: false,
             live_tile: None,
@@ -293,6 +297,10 @@ impl Widget {
     }
     pub fn grow(mut self) -> Self {
         self.size.grow = 1.;
+        self
+    }
+    pub fn reorderable(mut self, enabled: bool) -> Self {
+        self.reorderable = enabled;
         self
     }
     pub fn sound(mut self, feedback: crate::SoundFeedback) -> Self {

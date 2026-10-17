@@ -133,6 +133,34 @@ impl Theme {
             tilt: true,
         }
     }
+    /// A related accent shade with readable contrast on both neutral surfaces.
+    /// Filled controls keep the original accent and use `on_accent` instead.
+    pub fn accent_text(&self) -> Color {
+        let contrast = |color: Color| color.contrast(self.bg).min(color.contrast(self.surface));
+        if contrast(self.accent) >= 4.5 {
+            return self.accent;
+        }
+        let white = Color::hex(0xffffff);
+        let black = Color::hex(0);
+        let target = if contrast(self.fg) >= 4.5 {
+            self.fg
+        } else if contrast(white) > contrast(black) {
+            white
+        } else {
+            black
+        };
+        let mut low = 0.;
+        let mut high = 1.;
+        for _ in 0..24 {
+            let middle = (low + high) / 2.;
+            if contrast(self.accent.mix(target, middle)) >= 4.5 {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        self.accent.mix(target, high)
+    }
     /// Replace the single chrome accent, preserving readable text on filled controls.
     pub fn with_accent(mut self, accent: Color) -> Self {
         self.accent = accent;

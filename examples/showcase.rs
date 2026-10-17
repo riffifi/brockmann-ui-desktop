@@ -56,6 +56,7 @@ struct Showcase {
     running: bool,
     item: usize,
     order: Vec<usize>,
+    tile_order: Vec<usize>,
     status: String,
     sound_enabled: bool,
     sound_essential: bool,
@@ -87,6 +88,7 @@ impl Default for Showcase {
             running: false,
             item: 0,
             order: vec![0, 1, 2],
+            tile_order: vec![0, 1, 2, 3],
             status: "Ready / every control is interactive".into(),
             sound_enabled: false,
             sound_essential: false,
@@ -105,7 +107,7 @@ impl Showcase {
         ][self.companions]
     }
     fn picker(&self) -> ColorPicker {
-        ColorPicker::metro()
+        ColorPicker::windows8()
             .companions(self.count())
             .orientation(if self.vertical {
                 Orientation::Vertical
@@ -119,7 +121,7 @@ impl Showcase {
             })
     }
     fn theme(&self, ui: &mut Ui) {
-        let color = ColorPicker::metro().schemes[self.selected].primary;
+        let color = ColorPicker::windows8().schemes[self.selected].primary;
         let mut theme = Theme::new(self.light, Accent::Teal).with_accent(color);
         theme.text_scale = ui.theme.text_scale;
         theme.reduce_motion = self.reduced;
@@ -264,7 +266,7 @@ impl Showcase {
             Widget::color_picker("colour-main", "Scheme", self.picker(), self.selected)
                 .height(if self.vertical { 360. } else { 96. }),
         ];
-        let scheme = &ColorPicker::metro().schemes[self.selected];
+        let scheme = &ColorPicker::windows8().schemes[self.selected];
         rows.push(note(
             "scheme-note",
             &format!(
@@ -301,7 +303,7 @@ impl Showcase {
                     "Two companions",
                     "Three companions",
                 ][i],
-                ColorPicker::metro().companions(count),
+                ColorPicker::windows8().companions(count),
                 self.selected,
             ));
         }
@@ -320,7 +322,7 @@ impl Showcase {
                     Widget::color_picker(
                         "vertical-ribbon",
                         "Ribbon",
-                        ColorPicker::metro()
+                        ColorPicker::windows8()
                             .orientation(Orientation::Vertical)
                             .companions(CompanionCount::Three),
                         self.selected,
@@ -329,7 +331,7 @@ impl Showcase {
                     Widget::color_picker(
                         "vertical-swatches",
                         "Swatches",
-                        ColorPicker::metro()
+                        ColorPicker::windows8()
                             .orientation(Orientation::Vertical)
                             .variant(ColorPickerVariant::Swatches)
                             .companions(CompanionCount::Three),
@@ -344,7 +346,7 @@ impl Showcase {
             Widget::color_picker(
                 "disabled-palette",
                 "Disabled palette",
-                ColorPicker::metro().companions(CompanionCount::One),
+                ColorPicker::windows8().companions(CompanionCount::One),
                 self.selected,
             )
             .disabled(true),
@@ -569,7 +571,8 @@ impl Showcase {
                             active: self.toggled,
                         },
                     )
-                    .width(192.),
+                    .width(192.)
+                    .height(192.),
                     Widget::new(
                         "live-tile",
                         "session",
@@ -579,7 +582,8 @@ impl Showcase {
                         },
                     )
                     .live_tile("take 08 / recording", 3.)
-                    .width(192.),
+                    .width(192.)
+                    .height(192.),
                 ],
             )
             .height(192.),
@@ -620,6 +624,30 @@ impl Showcase {
             )
             .width(8.)
             .height(120.),
+        );
+        rows.push(heading("drag-tiles-heading", "drag tiles / flat movement"));
+        rows.push(
+            Widget::row(
+                "drag-tiles",
+                self.tile_order
+                    .iter()
+                    .map(|i| {
+                        Widget::new(
+                            Id::from(format!("drag-tile-{i}").as_str()),
+                            ["drums", "bass", "keys", "voice"][*i],
+                            Kind::Tile {
+                                value: format!("{:02}", i + 1),
+                                active: *i == 0,
+                            },
+                        )
+                        .width(128.)
+                        .height(96.)
+                        .reorderable(true)
+                    })
+                    .collect(),
+            )
+            .gap(16.)
+            .height(96.),
         );
         rows.push(heading("list-heading", "list selection / drag to reorder"));
         for i in &self.order {
@@ -703,7 +731,7 @@ impl Showcase {
             Widget::color_picker(
                 "motion-palette",
                 "Selection / 180 ms",
-                ColorPicker::metro().companions(CompanionCount::Three),
+                ColorPicker::windows8().companions(CompanionCount::Three),
                 self.selected,
             ),
             button("navigate", "Replay page transition"),
@@ -741,7 +769,8 @@ impl Showcase {
                             active: true,
                         },
                     )
-                    .width(96.),
+                    .width(96.)
+                    .height(96.),
                     Widget::new(
                         "layout-tile-2",
                         "two units",
@@ -750,7 +779,8 @@ impl Showcase {
                             active: false,
                         },
                     )
-                    .width(200.),
+                    .width(200.)
+                    .height(96.),
                 ],
             )
             .height(96.),
@@ -906,7 +936,7 @@ impl Application for Showcase {
                 Value::Selection(n) if id == Id::from("custom-palette") => self.custom = n,
                 Value::Selection(n) => {
                     self.selected = n;
-                    self.status = ColorPicker::metro().schemes[n].description();
+                    self.status = ColorPicker::windows8().schemes[n].description();
                 }
                 Value::Bool(b) if id == Id::from("sound-enabled") => {
                     self.sound_enabled = b;
@@ -980,7 +1010,7 @@ impl Application for Showcase {
                     ui.notify("Scheme applied to the interface");
                 }
                 id if id == Id::from("copy-colour") => {
-                    let picker = ColorPicker::metro();
+                    let picker = ColorPicker::windows8();
                     let scheme = &picker.schemes[self.selected];
                     let mut values = scheme.description();
                     for c in scheme.companions.iter().take(self.companions).flatten() {
@@ -1046,6 +1076,19 @@ impl Application for Showcase {
                 }
             }
             Event::Reorder { item, before } => {
+                let from = self
+                    .tile_order
+                    .iter()
+                    .position(|i| item == Id::from(format!("drag-tile-{i}").as_str()));
+                let to = self
+                    .tile_order
+                    .iter()
+                    .position(|i| before == Id::from(format!("drag-tile-{i}").as_str()));
+                if let (Some(from), Some(to)) = (from, to) {
+                    let tile = self.tile_order.remove(from);
+                    self.tile_order.insert(to, tile);
+                }
+
                 let from = self
                     .order
                     .iter()
@@ -1151,7 +1194,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None,
             None,
             None,
-            Some((snapshot_view, scroll)),
+            Some(support::SnapshotView {
+                viewport: snapshot_view,
+                scroll,
+                drag: option("--drag")
+                    .map(|s| s.split_once(':').ok_or("drag expects source:target"))
+                    .transpose()?,
+            }),
         ))
     } else {
         run(app)

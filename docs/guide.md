@@ -151,9 +151,9 @@ Below 720 px, the picker uses a compact full-page list at the left margin. In ei
 
 ## Mouse navigation in pivots
 
-A pivot keeps its active title on the main left axis and crops earlier titles. Whenever an earlier section exists, Brockmann adds a quiet previous chevron with a 40 px pointer target (48 px for touch), a named accessibility action and a tooltip naming the previous section. It lives in the left gutter when that gutter is clear. On narrow or crowded layouts it occupies a separate lane at the right edge, leaving the title axis intact.
+Pivot titles retain their positions when they fit. Selecting a later title does not move it to the left edge or hide earlier options. Overflow moves only enough to reveal the selected title. Click any visible title to go back; there is no previous-arrow control. In a narrow viewport, pan the strip with a trackpad, wheel or pointer drag to reach earlier titles. Keyboard arrows and accessible tab options remain available.
 
-This is automatic for `Widget::choice(..., true)` and applies independently to nested pivots such as the screen selector and synth instrument selector. Clicking the chevron emits the same `Value::Selection` as keyboard Left; route it through your normal page model. It disappears at the first section. Ordinary segmented choices do not gain the chevron.
+This applies independently to nested pivots and ordinary choices. `Value::Selection` still reports the chosen index. Precise trackpad events preserve the OS's acceleration and momentum as logical pixels, with no extra synthetic coast. Custom hosts send `Input::Scroll { delta, phase }`; `Ui::touchpad_gain` defaults to 1.0. Precise scrolling over a parameter control scrolls the page rather than changing the parameter accidentally; wheel detents retain their parameter-step behavior.
 
 ## Themes and preferences
 
@@ -227,3 +227,7 @@ Run `cargo run --example showcase` to explore every widget, type role, all five 
 ## Optional interaction sound
 
 Sound stays off until the application sets `ui.sound.mode` to `SoundMode::Essential` or `SoundMode::Subtle`. The host provides asynchronous device setup, a small synthesized click/pop family and semantic routing, while continuous controls and editing stay silent. Explicit success/failure cues come from `Ui::play_sound`, after the result is known. See [`sound`](crate::sound) for research, mappings, configuration and audio-engine integration. Audition the family with `cargo run --example showcase -- --page sound --sound`.
+
+## Reordering rows and tiles
+
+List rows are reorderable by default; tiles opt in with `.reorderable(true)`. Stable keyed siblings under the same parent can move between slots. Mouse drag starts after a small movement; touch uses a 250 ms hold so ordinary swipes can scroll. The dragged surface stays flat and follows the pointer while neighbouring items animate over 200 ms. `Event::Reorder { item, before }` names the target item slot; update the application order immediately, as the showcase does. Release or Escape settles the surface into its current slot. Alt+arrow keys reorder within the same parent. Near the scroll viewport edges, a held item scrolls the page. Reduced motion removes decorative tilt and crossfades settling/reflow.

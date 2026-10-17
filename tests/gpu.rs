@@ -99,6 +99,22 @@ fn offscreen_primitives_fonts_clipping_and_scale() {
                 },
                 clip,
             );
+            let moving = scene.draws.len();
+            scene.text(
+                Rect::new(280., 200., 100., 24.),
+                "moving",
+                TypeRole::Body,
+                Color::hex(0xffffff),
+                clip,
+            );
+            scene.transform_since(
+                moving,
+                brockmann::animation::Transform {
+                    y: -112.,
+                    ..Default::default()
+                },
+                Point::new(280., 200.),
+            );
             renderer
                 .render(
                     &scene,
@@ -177,6 +193,11 @@ fn offscreen_primitives_fonts_clipping_and_scale() {
                 ink(160., 200., 260., 224.) > ink(24., 200., 124., 224.),
                 "runtime variable weight must change raster coverage"
             );
+            assert!(
+                ink(280., 88., 380., 112.) > 1000,
+                "transformed text must not clip at its old location"
+            );
+            assert_eq!(ink(280., 200., 380., 224.), 0);
             if std::env::var_os("BROCKMANN_WRITE_SNAPSHOTS").is_some() {
                 std::fs::create_dir_all("target/screenshots").unwrap();
                 let file =

@@ -1,6 +1,6 @@
 # Colour schemes and the ribbon picker
 
-The Windows 8 inspired ribbon presents a sequence of named colour schemes. Each scheme has one primary colour and zero to three companion colours. A continuous ribbon resembles the reference; spaced swatches give individual schemes more separation. Both work horizontally and vertically, with the same interaction model.
+The Windows 8 inspired ribbon presents a sequence of named colour schemes. Each scheme has one primary colour and zero to three companion colours. The ribbon follows the Windows 8 treatment: a thin framed band of tinted columns, inset bright squares and paired hollow triangles. Spaced swatches give individual schemes more separation. Both work horizontally and vertically, with the same interaction model.
 
 The small squares preview companions. This is Brockmann's interpretation of the reference: applications supply their meaning and values. They might represent a background, a secondary accent and a highlight. Choosing a scheme selects the whole set. A picker with no companions still selects a primary colour; “none” does not mean a transparent colour or no selection.
 
@@ -13,7 +13,7 @@ let palette = ColorPicker::metro().companions(CompanionCount::Two);
 let picker = Widget::color_picker("scheme", "Colour scheme", palette, 4);
 ```
 
-`metro()` contains sixteen named schemes with authored light, deep and contrasting companions. It is a Brockmann palette, not an import of Windows settings. The zero-based selection index is controlled by the application, just like a dropdown. Keep IDs and scheme ordering stable while the control is mounted.
+`windows8()` contains a 32-column spectrum used by the showcase; `metro()` contains sixteen named schemes with authored light, deep and contrasting companions. It is a Brockmann palette, not an import of Windows settings. The zero-based selection index is controlled by the application, just like a dropdown. Keep IDs and scheme ordering stable while the control is mounted.
 
 ```rust
 use brockmann::{ColorPicker, Event, Id};
@@ -59,9 +59,11 @@ let picker = Widget::color_picker("scheme-vertical", "Scheme", vertical, 4)
 
 Horizontal controls default to 96 logical pixels high. Vertical controls default to 360; allow at least 128 pixels of width for three companions and markers, and more for a full header. The header includes the label, selected name and primary hex value. Leave this height intact; avoid squeezing the control down to the visual colour band's height.
 
-Each scheme occupies a 48 pixel hit target along the strip. Sixteen schemes need 768 pixels to be visible together. In a smaller viewport the strip follows the selection, keeping the active option visible. Users can reach the rest with the wheel, keyboard or assistive actions. Pointer dragging scrubs visible schemes; it does not implement inertial scrolling. Choose a smaller custom palette for a compact touch panel where seeing every option at once matters.
+Ribbon columns occupy 24 logical pixels each, with the true primary colour shown as a small square inside a darker tinted band. Companions use a compact row of squares outside that band. This is deliberately dense, matching the legacy reference. `windows8()` needs 772 pixels including its frame to show all 32 columns. Swatches use 48 pixel targets and larger 32 px samples; prefer them for touch. `cell_extent()` reports the configured size.
 
-The carets sit outside the colour samples, so selection remains visible for light, dark and low-contrast samples without changing their appearance. A normal keyboard focus outline surrounds the control. Colour values are content: they stay the same in light and dark themes. Disabled samples are muted.
+In a smaller viewport the palette follows the selection, keeping the active option visible. Users can reach the rest with wheel, keyboard or assistive actions. Pointer dragging scrubs visible schemes; it does not implement inertial scrolling. Use a smaller custom palette when every option must be visible together. Colour names and hex values remain available through the readout and tooltips.
+
+The carets sit outside the colour samples, so selection remains visible for light, dark and low-contrast samples without changing their appearance. A normal keyboard focus outline surrounds the control. Colour values are content: they stay the same in light and dark themes. Disabled samples are muted. The 32-colour palette and companion values are a reconstruction of the visual treatment, not a pixel extraction of a particular Windows theme.
 
 ## Supply your own schemes
 

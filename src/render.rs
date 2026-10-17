@@ -391,8 +391,8 @@ impl Renderer {
                     buffer,
                     color,
                 } => {
-                    let text_clip = clip.intersect(bounds.snap(scale));
-                    instance.clip = [
+                    let text_clip = bounds.snap(scale);
+                    instance.extra = [
                         text_clip.x,
                         text_clip.y,
                         text_clip.right(),
@@ -467,8 +467,8 @@ impl Renderer {
                         self.buffers.insert(key, b.clone());
                         b
                     };
-                    let text_clip = clip.intersect(bounds.snap(scale));
-                    instance.clip = [
+                    let text_clip = bounds.snap(scale);
+                    instance.extra = [
                         text_clip.x,
                         text_clip.y,
                         text_clip.right(),

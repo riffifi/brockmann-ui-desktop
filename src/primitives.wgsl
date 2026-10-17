@@ -49,6 +49,9 @@ struct VertexOut { @builtin(position) position: vec4<f32>, @location(0) local: v
         let distance=length(p-mix(a,b,t))-i.params.y*0.5;
         coverage=1.-smoothstep(-0.5,0.5,distance);
     }
-    if i.params.x==3. {coverage=textureSample(atlas,atlas_sampler,v.uv).r;}
+    if i.params.x==3. {
+        if v.local.x<i.extra.x || v.local.y<i.extra.y || v.local.x>=i.extra.z || v.local.y>=i.extra.w {discard;}
+        coverage=textureSample(atlas,atlas_sampler,v.uv).r;
+    }
     return vec4(i.color.rgb,i.color.a*coverage*i.movement.w);
 }

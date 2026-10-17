@@ -2,7 +2,7 @@
 use crate::{
     Point, Rect,
     icons::Icon,
-    scene::Scene,
+    scene::{Primitive, Scene},
     theme::{Color, Theme, TypeRole},
 };
 
@@ -135,30 +135,93 @@ impl ColorPicker {
                 .collect(),
         )
     }
+    /// Dense Windows 8 style spectrum. Companion colours remain application data.
+    pub fn windows8() -> Self {
+        let colors = [
+            ("gold", 0xc6b324),
+            ("olive", 0x718c31),
+            ("slate blue", 0x375c9c),
+            ("wine", 0x8e243d),
+            ("plum", 0x682d73),
+            ("brick", 0x9c332c),
+            ("rust", 0xb94b18),
+            ("ruby", 0xbe2044),
+            ("berry", 0x8c147c),
+            ("indigo", 0x48249a),
+            ("navy", 0x183c78),
+            ("ocean", 0x16739d),
+            ("forest", 0x13834b),
+            ("green", 0x38a029),
+            ("lime", 0x88bf24),
+            ("tangerine", 0xf89619),
+            ("coral", 0xee5035),
+            ("fuchsia", 0xde3986),
+            ("purple", 0x9c42cb),
+            ("cobalt", 0x4266cb),
+            ("sky", 0x239bd5),
+            ("cyan", 0x2bb7d0),
+            ("turquoise", 0x34c5be),
+            ("mint", 0x70c391),
+            ("chartreuse", 0xc4d53b),
+            ("yellow", 0xf2c627),
+            ("orange", 0xe99a32),
+            ("salmon", 0xdb7465),
+            ("orchid", 0xc87ba9),
+            ("periwinkle", 0x8a90d0),
+            ("sea", 0x4eaaa6),
+            ("terracotta", 0xc56143),
+        ];
+        Self::new(
+            colors
+                .into_iter()
+                .map(|(name, hex)| {
+                    let primary = Color::hex(hex);
+                    ColorScheme::new(name, primary).companions(&[
+                        primary.mix(Color::hex(0xffffff), 0.50),
+                        primary.mix(Color::hex(0), 0.45),
+                        Color([primary.0[2], primary.0[0], primary.0[1], 1.]),
+                    ])
+                })
+                .collect(),
+        )
+    }
+    /// Ribbon columns are a dense legacy-style 24 px; swatches retain 48 px targets.
+    pub fn cell_extent(&self) -> f32 {
+        if self.variant == ColorPickerVariant::Ribbon {
+            24.
+        } else {
+            48.
+        }
+    }
     pub fn selected(&self, selected: usize) -> Option<&ColorScheme> {
         self.schemes
             .get(selected.min(self.schemes.len().saturating_sub(1)))
     }
-    /// Logical hit targets are always 48 px along the strip. Overflow follows the
-    /// animated selection, so keyboard and assistive actions reveal every scheme.
+    /// Overflow follows the animated selection. Use swatches for roomy touch targets.
     pub fn cell_bounds(&self, bounds: Rect, position: f64, index: usize) -> Rect {
         let vertical = self.orientation == Orientation::Vertical;
-        let extent = if vertical {
-            (bounds.h - 24.).max(0.)
+        let inset = if self.variant == ColorPickerVariant::Ribbon {
+            2.
         } else {
-            bounds.w.max(0.)
+            0.
         };
-        let total = self.schemes.len() as f32 * 48.;
+        let extent = if vertical {
+            (bounds.h - 24. - inset * 2.).max(0.)
+        } else {
+            (bounds.w - inset * 2.).max(0.)
+        };
+        let step = self.cell_extent();
+        let total = self.schemes.len() as f32 * step;
         let offset =
-            (position as f32 * 48. + 24. - extent / 2.).clamp(0., (total - extent).max(0.));
-        let along = index as f32 * 48. - offset;
+            (position as f32 * step + step / 2. - extent / 2.).clamp(0., (total - extent).max(0.));
+        let along = index as f32 * step - offset;
         if vertical {
-            Rect::new(bounds.x, bounds.y + 24. + along, bounds.w, 48.)
+            Rect::new(bounds.x, bounds.y + 24. + inset + along, bounds.w, step)
         } else {
             Rect::new(
-                bounds.x + along,
+                bounds.x + inset + along,
                 bounds.y + 24.,
-                48.,
+                step,
                 (bounds.h - 24.).max(0.),
             )
         }
@@ -199,54 +262,101 @@ impl ColorPicker {
             (bounds.h - 24.).max(0.),
         ));
         let vertical = self.orientation == Orientation::Vertical;
+        let ribbon = self.variant == ColorPickerVariant::Ribbon;
         for (i, scheme) in self.schemes.iter().enumerate() {
             let cell = self.cell_bounds(bounds, position, i);
-            if cell.intersect(strip_clip).w <= 0. || cell.intersect(strip_clip).h <= 0. {
+            let visible = cell.intersect(strip_clip);
+            if visible.w <= 0. || visible.h <= 0. {
                 continue;
             }
-            let gap = if self.variant == ColorPickerVariant::Swatches {
-                4.
-            } else {
-                0.
+            let muted = |color: Color| {
+                if disabled {
+                    color.mix(theme.bg, 0.65)
+                } else {
+                    color
+                }
             };
-            let main = if vertical {
-                Rect::new(cell.x + 12., cell.y + gap, 32., 48. - gap * 2.)
-            } else {
-                Rect::new(cell.x + gap, cell.y + 28., 48. - gap * 2., 28.)
-            };
-            let color = if disabled {
-                scheme.primary.mix(theme.bg, 0.65)
-            } else {
-                scheme.primary
-            };
-            scene.rect(main, color, strip_clip);
-            // A neutral hairline keeps very light/dark colour data legible on either surface.
-            if self.variant == ColorPickerVariant::Swatches {
-                scene.stroke(main, 1., theme.line, strip_clip);
-            }
-            for (j, color) in scheme
-                .companions
-                .iter()
-                .take(self.companions.get())
-                .enumerate()
-            {
-                if let Some(color) = color {
-                    let r = if vertical {
-                        Rect::new(cell.x + 52. + j as f32 * 16., cell.y + 18., 12., 12.)
-                    } else {
-                        Rect::new(cell.x + 4. + j as f32 * 14., cell.y + 12., 12., 12.)
-                    };
-                    scene.rect(
-                        r,
-                        if disabled {
-                            color.mix(theme.bg, 0.65)
+            if ribbon {
+                let band = if vertical {
+                    Rect::new(cell.x + 24., cell.y, 20., cell.h)
+                } else {
+                    Rect::new(cell.x, cell.y + 24., cell.w, 20.)
+                };
+                scene.rect(
+                    band,
+                    muted(scheme.primary.mix(Color::hex(0), 0.62)),
+                    strip_clip,
+                );
+                let square = if vertical {
+                    Rect::new(band.x + 6., cell.center().y - 4., 8., 8.)
+                } else {
+                    Rect::new(cell.center().x - 4., band.y + 6., 8., 8.)
+                };
+                scene.rect(square, muted(scheme.primary), strip_clip);
+                for (j, color) in scheme
+                    .companions
+                    .iter()
+                    .take(self.companions.get())
+                    .enumerate()
+                {
+                    if let Some(color) = color {
+                        let square = if vertical {
+                            Rect::new(
+                                band.right() + 6. + j as f32 * 8.,
+                                cell.center().y - 3.,
+                                6.,
+                                6.,
+                            )
                         } else {
-                            *color
-                        },
-                        strip_clip,
-                    );
+                            Rect::new(cell.x + 2. + j as f32 * 8., band.y - 10., 6., 6.)
+                        };
+                        scene.rect(square, muted(*color), strip_clip);
+                    }
+                }
+            } else {
+                let main = if vertical {
+                    Rect::new(cell.x + 12., cell.y + 8., 32., 32.)
+                } else {
+                    Rect::new(cell.x + 8., cell.y + 28., 32., 32.)
+                };
+                scene.rect(main, muted(scheme.primary), strip_clip);
+                scene.stroke(main, 1., theme.line, strip_clip);
+                for (j, color) in scheme
+                    .companions
+                    .iter()
+                    .take(self.companions.get())
+                    .enumerate()
+                {
+                    if let Some(color) = color {
+                        let square = if vertical {
+                            Rect::new(cell.x + 52. + j as f32 * 16., cell.y + 18., 12., 12.)
+                        } else {
+                            Rect::new(cell.x + 4. + j as f32 * 14., cell.y + 12., 12., 12.)
+                        };
+                        scene.rect(square, muted(*color), strip_clip);
+                    }
                 }
             }
+        }
+        if ribbon && !self.schemes.is_empty() {
+            let first = self.cell_bounds(bounds, position, 0);
+            let last = self.cell_bounds(bounds, position, self.schemes.len() - 1);
+            let frame = if vertical {
+                Rect::new(
+                    first.x + 22.,
+                    first.y - 2.,
+                    24.,
+                    last.bottom() - first.y + 4.,
+                )
+            } else {
+                Rect::new(
+                    first.x - 2.,
+                    first.y + 22.,
+                    last.right() - first.x + 4.,
+                    24.,
+                )
+            };
+            scene.stroke(frame, 1., theme.line_strong, strip_clip);
         }
         if self.schemes.is_empty() {
             return;
@@ -258,7 +368,59 @@ impl ColorPicker {
             self.cell_bounds(bounds, position, b),
             position.fract() as f32,
         );
-        if vertical {
+        if ribbon {
+            let triangles = if vertical {
+                let right = if self.companions == CompanionCount::None {
+                    cell.x + 50.
+                } else {
+                    cell.x + 54. + self.companions.get() as f32 * 8.
+                };
+                [
+                    [
+                        Point::new(cell.x + 10., cell.center().y - 4.),
+                        Point::new(cell.x + 10., cell.center().y + 4.),
+                        Point::new(cell.x + 17., cell.center().y),
+                    ],
+                    [
+                        Point::new(right + 7., cell.center().y - 4.),
+                        Point::new(right + 7., cell.center().y + 4.),
+                        Point::new(right, cell.center().y),
+                    ],
+                ]
+            } else {
+                let top = cell.y
+                    + if self.companions == CompanionCount::None {
+                        10.
+                    } else {
+                        0.
+                    };
+                [
+                    [
+                        Point::new(cell.center().x - 4., top),
+                        Point::new(cell.center().x + 4., top),
+                        Point::new(cell.center().x, top + 7.),
+                    ],
+                    [
+                        Point::new(cell.center().x - 4., cell.y + 58.),
+                        Point::new(cell.center().x + 4., cell.y + 58.),
+                        Point::new(cell.center().x, cell.y + 51.),
+                    ],
+                ]
+            };
+            for points in triangles {
+                for i in 0..3 {
+                    scene.push(
+                        Primitive::Line {
+                            from: points[i],
+                            to: points[(i + 1) % 3],
+                            width: 1.,
+                            color: fg,
+                        },
+                        strip_clip,
+                    );
+                }
+            }
+        } else if vertical {
             Icon::CaretRight.paint(
                 scene,
                 Rect::new(cell.x, cell.y + 18., 12., 12.),
@@ -280,7 +442,7 @@ impl ColorPicker {
             );
             Icon::CaretUp.paint(
                 scene,
-                Rect::new(cell.x + 18., cell.y + 58., 12., 12.),
+                Rect::new(cell.x + 18., cell.y + 62., 12., 12.),
                 fg,
                 strip_clip,
             );

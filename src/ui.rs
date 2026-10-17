@@ -69,6 +69,13 @@ pub enum PointerButton {
     Primary,
     Secondary,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollPhase {
+    Start,
+    Move,
+    End,
+    Cancel,
+}
 #[derive(Clone, Debug)]
 pub enum Input {
     /// Wake an embedded host to consume application-owned parameter channels.
@@ -84,6 +91,11 @@ pub enum Input {
     Cancel,
     Wheel {
         delta: f32,
+    },
+    /// Precise logical pixels, including the OS's acceleration and momentum.
+    Scroll {
+        delta: Point,
+        phase: ScrollPhase,
     },
     Key {
         key: Key,
@@ -106,6 +118,7 @@ struct State {
     editor: Option<TextEditor>,
     kind: std::mem::Discriminant<Kind>,
     choice_widths: Vec<f32>,
+    choice_offset: Tween,
     bounds: Option<Rect>,
     order: usize,
     reorder: Option<(Rect, Tween)>,
@@ -132,6 +145,7 @@ impl State {
             hover_since: None,
             kind: std::mem::discriminant(&w.kind),
             choice_widths: Vec::new(),
+            choice_offset: Tween::new(0., 0., now, 0., Curve::Linear),
             bounds: None,
             order: usize::MAX,
             reorder: None,
@@ -160,6 +174,7 @@ impl State {
 #[derive(Clone)]
 struct Node {
     w: Widget,
+    parent: Id,
     bounds: Rect,
     clip: Rect,
 }
@@ -175,6 +190,8 @@ struct Drag {
     touch: bool,
     moved: bool,
     started: f64,
+    origin: Rect,
+    reorder_target: Option<Id>,
 }
 #[derive(Clone, Debug)]
 pub enum Overlay {
@@ -259,6 +276,8 @@ pub struct Ui {
     pub debug: DebugOptions,
     pub viewport: Rect,
     pub scroll: Scroll,
+    /// Multiplier for precise trackpad pixels; 1 preserves platform acceleration.
+    pub touchpad_gain: f32,
     scroll_bounds: Option<Rect>,
     scroll_at: f64,
     last_click: Option<(Id, f64)>,
@@ -307,6 +326,7 @@ impl Ui {
             debug: DebugOptions::default(),
             viewport: Rect::default(),
             scroll: Scroll::default(),
+            touchpad_gain: 1.,
             scroll_bounds: None,
             scroll_at: -1.,
             last_click: None,
@@ -496,6 +516,7 @@ impl Ui {
                 clip: Rect,
                 offset: f32,
                 disabled: bool,
+                parent: Id,
             ) {
                 w.disabled |= disabled;
                 let bounds = w.bounds.unwrap_or(fallback).translate(0., -offset);
@@ -545,12 +566,18 @@ impl Ui {
                 }
                 let scrollable = w.scrollable;
                 let disabled = w.disabled;
-                self.nodes.push(Node { w, bounds, clip });
+                let owner = w.id;
+                self.nodes.push(Node {
+                    w,
+                    bounds,
+                    clip,
+                    parent,
+                });
                 for (child, r) in children.into_iter().zip(placements) {
                     // Explicit bounds are absolute logical coordinates. Stack bounds already
                     // contain their ancestor's translation, so apply each offset exactly once.
                     let delta = if scrollable { self.offset } else { 0. };
-                    self.visit(child, r, clip.intersect(bounds), delta, disabled);
+                    self.visit(child, r, clip.intersect(bounds), delta, disabled, owner);
                 }
             }
         }
@@ -560,7 +587,7 @@ impl Ui {
             offset: self.scroll.offset,
             scroll: None,
         };
-        pass.visit(root, viewport, viewport, 0., false);
+        pass.visit(root, viewport, viewport, 0., false, Id(0));
         self.scroll_bounds = pass.scroll.map(|v| v.0);
         self.scroll.max = pass.scroll.map_or(0., |v| v.1);
         nodes.append(&mut pass.nodes);
@@ -579,9 +606,10 @@ impl Ui {
             if s.kind != std::mem::discriminant(&w.kind) {
                 *s = State::new(w, now, &mut self.fonts);
             }
+            let initial = s.order == usize::MAX;
             if s.order != usize::MAX
                 && s.order != order
-                && matches!(w.kind, Kind::ListItem { .. })
+                && w.reorderable
                 && let Some(old) = s.bounds
             {
                 let from = if let Some((from, tween)) = s.reorder {
@@ -595,7 +623,7 @@ impl Ui {
                         0.,
                         1.,
                         now,
-                        if self.theme.reduce_motion { 0.1 } else { 0.16 },
+                        if self.theme.reduce_motion { 0.1 } else { 0.20 },
                         Curve::OutExpo,
                     ),
                 ));
@@ -615,6 +643,24 @@ impl Ui {
                         crate::text::measure(&mut self.fonts, text, role, self.theme.text_scale)
                     })
                     .collect();
+                let target = choice_reveal_offset(
+                    &s.choice_widths,
+                    w.value() as usize,
+                    24. * self.theme.text_scale,
+                    n.bounds.w,
+                    s.choice_offset.target,
+                );
+                if initial {
+                    s.choice_offset =
+                        Tween::new(target as f64, target as f64, now, 0., Curve::Linear);
+                } else if (target as f64 - s.choice_offset.target).abs() > 0.01 {
+                    s.choice_offset.retarget(
+                        target as f64,
+                        now,
+                        if self.theme.reduce_motion { 0. } else { 0.18 },
+                        Curve::OutExpo,
+                    );
+                }
             }
             if s.model != w.value() {
                 s.model = w.value();
@@ -678,9 +724,8 @@ impl Ui {
             .rev()
             .find(|n| {
                 n.w.interactive()
-                    && ((hit_bounds(n.bounds, if self.touch { 48. } else { 40. }).contains(p)
-                        && n.clip.contains(p))
-                        || self.pivot_previous_rect(n).is_some_and(|r| r.contains(p)))
+                    && hit_bounds(n.bounds, if self.touch { 48. } else { 40. }).contains(p)
+                    && n.clip.contains(p)
             })
             .map(|n| n.w.id)
     }
@@ -724,6 +769,9 @@ impl Ui {
             } else {
                 s.value = Tween::new(n, n, now, 0., Curve::Linear)
             }
+        }
+        if let Some(n) = n {
+            self.reveal_choice(id, n as usize);
         }
         if let Some(n) = n
             && let Some(node) = self.node(id)
@@ -867,6 +915,8 @@ impl Ui {
                         .and_then(|d| self.node(d.id))
                         .is_some_and(|n| {
                             n.w.range().is_some()
+                                || (n.w.reorderable
+                                    && now - self.drag.as_ref().unwrap().started >= 0.25)
                                 || matches!(
                                     n.w.kind,
                                     Kind::Toggle { .. }
@@ -906,7 +956,9 @@ impl Ui {
                 }
                 if let Some(mut drag) = self.drag.take() {
                     if let Some(n) = self.node(drag.id) {
-                        drag.moved |= (p.x - drag.start.x).abs() + (p.y - drag.start.y).abs() > 4.;
+                        let armed = !drag.touch || !n.w.reorderable || now - drag.started >= 0.25;
+                        drag.moved |=
+                            armed && (p.x - drag.start.x).abs() + (p.y - drag.start.y).abs() > 4.;
                         let dt = (now - drag.last_at).max(0.001);
                         drag.velocity = (p.x - drag.last.x) / dt as f32;
                         match n.w.kind {
@@ -934,6 +986,9 @@ impl Ui {
                                     .clamp(min, max);
                                 self.change(drag.id, Value::Number(v), false);
                             }
+                            Kind::Choice { .. } if drag.moved => {
+                                self.pan_choice(drag.id, drag.last.x - p.x);
+                            }
                             Kind::ColorPicker { ref picker, .. } => {
                                 let position = self.states[&drag.id].value.sample(now).0;
                                 if let Some(i) = picker.hit(n.bounds, position, p)
@@ -960,6 +1015,9 @@ impl Ui {
                             }
                             _ => {}
                         }
+                    }
+                    if drag.moved && self.node(drag.id).is_some_and(|n| n.w.reorderable) {
+                        self.reorder_at(&mut drag, p);
                     }
                     drag.last = p;
                     drag.last_at = now;
@@ -1048,18 +1106,14 @@ impl Ui {
                         self.touch_start = None;
                     }
                     Kind::Choice { options, .. } => {
-                        if self.pivot_previous_rect(&n).is_some_and(|r| r.contains(p)) {
-                            let previous = (self.states[&id].model as usize).saturating_sub(1);
-                            self.change(id, Value::Selection(previous), true);
-                        } else {
-                            let spans = self.choice_spans(&n);
-                            if self.choice_clip(&n).contains(p)
-                                && let Some(i) = spans.iter().position(|r| r.contains(p))
-                                && i < options.len()
-                            {
-                                self.change(id, Value::Selection(i), true);
-                            }
+                        let spans = self.choice_spans(&n);
+                        if self.choice_clip(&n).contains(p)
+                            && let Some(i) = spans.iter().position(|r| r.contains(p))
+                            && i < options.len()
+                        {
+                            self.change(id, Value::Selection(i), true);
                         }
+                        self.touch_start = None;
                     }
                     Kind::Input { .. } => {
                         let r = input_rect(&n);
@@ -1118,6 +1172,8 @@ impl Ui {
                     touch,
                     moved: false,
                     started: now,
+                    origin: n.bounds,
+                    reorder_target: None,
                 });
                 self.update_focus_rect();
             }
@@ -1148,11 +1204,8 @@ impl Ui {
                         };
                         self.change(d.id, Value::Bool(on), true);
                     }
-                    if d.moved
-                        && matches!(n.w.kind, Kind::ListItem { .. })
-                        && let Some(before) = self.hit(p).filter(|id| *id != d.id)
-                    {
-                        self.events.push(Event::Reorder { item: d.id, before });
+                    if d.moved && n.w.reorderable {
+                        self.land_reorder(&d, p);
                     }
                     self.states.get_mut(&d.id).unwrap().press.retarget(
                         0.,
@@ -1183,6 +1236,12 @@ impl Ui {
                 }
             }
             Input::Cancel => {
+                if let Some(d) = self.drag.as_ref().cloned()
+                    && d.moved
+                    && self.node(d.id).is_some_and(|n| n.w.reorderable)
+                {
+                    self.land_reorder(&d, d.last);
+                }
                 if let Some(d) = self.drag.take()
                     && let Some(s) = self.states.get_mut(&d.id)
                 {
@@ -1195,7 +1254,59 @@ impl Ui {
                 self.touch_scrolling = false;
                 self.touch_velocity = 0.;
             }
+            Input::Scroll { delta, phase } => {
+                if phase == ScrollPhase::Cancel {
+                    self.scroll.velocity = 0.;
+                    return;
+                }
+                let gain = if self.touchpad_gain.is_finite() {
+                    self.touchpad_gain.clamp(0.1, 4.)
+                } else {
+                    1.
+                };
+                let delta = Point::new(delta.x * gain, delta.y * gain);
+                if !delta.x.is_finite() || !delta.y.is_finite() {
+                    return;
+                }
+                if let Some(id) = self.hover
+                    && let Some(n) = self.node(id)
+                {
+                    if matches!(n.w.kind, Kind::Choice { .. }) {
+                        self.pan_choice(
+                            id,
+                            -if delta.x.abs() > delta.y.abs() {
+                                delta.x
+                            } else {
+                                delta.y
+                            },
+                        );
+                        return;
+                    }
+                    if let Some(editor) = self.states.get_mut(&id).and_then(|s| s.editor.as_mut()) {
+                        editor.action(
+                            &mut self.fonts,
+                            TextAction::Scroll { pixels: -delta.y },
+                            false,
+                            now,
+                        );
+                        return;
+                    }
+                }
+                self.scroll.velocity = 0.;
+                if self.scroll_bounds.is_some_and(|r| r.contains(self.pointer)) {
+                    self.scroll.drag(-delta.y);
+                    self.scroll_at = now;
+                }
+            }
             Input::Wheel { delta } => {
+                if let Some(id) = self.hover
+                    && self
+                        .node(id)
+                        .is_some_and(|n| matches!(n.w.kind, Kind::Choice { .. }))
+                {
+                    self.pan_choice(id, -delta * 32.);
+                    return;
+                }
                 if let Some(id) = self.hover
                     && let Some(n) = self.node(id)
                     && let Kind::ColorPicker { picker, .. } = n.w.kind
@@ -1302,6 +1413,9 @@ impl Ui {
                 return;
             }
             Key::Escape => {
+                if self.drag.is_some() {
+                    self.input(Input::Cancel);
+                }
                 for s in self.states.values_mut() {
                     s.learn = false;
                 }
@@ -1400,15 +1514,17 @@ impl Ui {
                 _ => current,
             };
             self.change(id, Value::Selection(selected), true);
-        } else if matches!(n.w.kind, Kind::ListItem { .. }) && matches!(key, Key::Up | Key::Down) {
+        } else if n.w.reorderable && matches!(key, Key::Up | Key::Down | Key::Left | Key::Right) {
             let ids: Vec<_> = self
                 .nodes
                 .iter()
-                .filter(|n| n.w.interactive() && matches!(n.w.kind, Kind::ListItem { .. }))
+                .filter(|item| {
+                    item.parent == n.parent && item.w.interactive() && item.w.reorderable
+                })
                 .map(|n| n.w.id)
                 .collect();
             if let Some(i) = ids.iter().position(|i| *i == id) {
-                let next = if key == Key::Up {
+                let next = if matches!(key, Key::Up | Key::Left) {
                     i.saturating_sub(1)
                 } else {
                     (i + 1).min(ids.len() - 1)
@@ -1731,6 +1847,26 @@ impl Ui {
                     self.dismiss();
                 }
             }
+            Input::Scroll { delta, phase } if matches!(p.kind, Overlay::Picker { .. }) => {
+                if phase != ScrollPhase::Cancel && delta.y.is_finite() {
+                    let padding = if self.viewport.w < 720. {
+                        0.
+                    } else {
+                        PICKER_MENU_PADDING * self.theme.text_scale
+                    };
+                    let max = (rows.len() as f32 * PICKER_ROW_HEIGHT * self.theme.text_scale
+                        - (full_bounds.h - 2. * padding).max(0.))
+                    .max(0.);
+                    let gain = if self.touchpad_gain.is_finite() {
+                        self.touchpad_gain.clamp(0.1, 4.)
+                    } else {
+                        1.
+                    };
+                    self.popup.as_mut().unwrap().scroll =
+                        (p.scroll - delta.y * gain).clamp(0., max);
+                    self.keyboard_focus = false;
+                }
+            }
             Input::Wheel { delta } if matches!(p.kind, Overlay::Picker { .. }) => {
                 let padding = if self.viewport.w < 720. {
                     0.
@@ -1809,6 +1945,17 @@ impl Ui {
         let now = self.clock.now();
         let dt = now - before;
         self.scroll.tick(dt as f32);
+        let speed = self.reorder_scroll_speed();
+        if speed != 0. {
+            self.scroll.offset =
+                (self.scroll.offset + speed * dt as f32).clamp(0., self.scroll.max);
+            self.scroll.velocity = 0.;
+            self.scroll_at = now;
+            if let Some(mut drag) = self.drag.take() {
+                self.reorder_at(&mut drag, self.pointer);
+                self.drag = Some(drag);
+            }
+        }
         for (id, s) in &mut self.states {
             if let Some(live) = self
                 .nodes
@@ -1816,7 +1963,10 @@ impl Ui {
                 .find(|n| n.w.id == *id)
                 .and_then(|n| n.w.live_tile.as_ref())
             {
-                if now >= s.live_due && self.hover != Some(*id) {
+                if now >= s.live_due
+                    && self.hover != Some(*id)
+                    && self.drag.as_ref().is_none_or(|d| d.id != *id)
+                {
                     s.live_at = now;
                     s.live_due = now + live.interval;
                     s.live_swapped = false;
@@ -1861,7 +2011,12 @@ impl Ui {
         if let Some(d) = self
             .drag
             .as_ref()
-            .filter(|d| d.touch && !d.moved && now - d.started >= 0.5)
+            .filter(|d| {
+                d.touch
+                    && !d.moved
+                    && now - d.started >= 0.5
+                    && !self.node(d.id).is_some_and(|n| n.w.reorderable)
+            })
             .cloned()
         {
             self.events.push(Event::Context(d.id, d.last));
@@ -1880,7 +2035,8 @@ impl Ui {
         if self.clock.paused {
             return false;
         }
-        self.scroll.velocity.abs() > 0.1
+        self.reorder_scroll_speed() != 0.
+            || self.scroll.velocity.abs() > 0.1
             || self.scroll.offset < -0.1
             || self.scroll.offset > self.scroll.max + 0.1
             || (now - self.scroll_at < 1.0)
@@ -1888,6 +2044,7 @@ impl Ui {
             || self.page_at + 0.65 > now
             || self.states.values().any(|s| {
                 s.value.active(now)
+                    || s.choice_offset.active(now)
                     || now - s.hit_at < 0.3
                     || now - s.live_at < if self.theme.reduce_motion { 0.1 } else { 0.4 }
                     || s.reorder.is_some_and(|(_, t)| t.active(now))
@@ -1951,7 +2108,9 @@ impl Ui {
         let live = self
             .states
             .iter()
-            .filter(|(id, _)| self.hover != Some(**id))
+            .filter(|(id, _)| {
+                self.hover != Some(**id) && self.drag.as_ref().is_none_or(|d| d.id != **id)
+            })
             .map(|(_, s)| s.live_due - now)
             .filter(|v| v.is_finite())
             .map(|v| v.max(0.001))
@@ -2007,13 +2166,24 @@ impl Ui {
         let mut scene = Scene::default();
         let theme = self.current_theme();
         let now = self.clock.now();
+        let lifted = self
+            .drag
+            .as_ref()
+            .filter(|d| d.moved)
+            .and_then(|d| self.node(d.id).filter(|n| n.w.reorderable));
         for (index, n) in self.nodes.iter().enumerate() {
+            if lifted.as_ref().is_some_and(|drag| drag.w.id == n.w.id) {
+                continue;
+            }
             let start = scene.draws.len();
             self.paint_node(&mut scene, n, &theme);
             if now - self.page_at < 0.65 {
                 let t = crate::animation::feather(now - self.page_at, index, theme.reduce_motion);
                 scene.transform_since(start, t, Point::new(n.bounds.x, n.bounds.center().y));
             }
+        }
+        if let Some(n) = lifted {
+            self.paint_node(&mut scene, &n, &theme);
         }
         if let Some(old) = &self.page_outgoing {
             let elapsed = now - self.page_at;
@@ -2101,10 +2271,7 @@ impl Ui {
             if elapsed >= 0. {
                 let a = (elapsed / 0.1).clamp(0., 1.) as f32;
                 let w = (text.chars().count() as f32 * 6.5 + 24.).min(self.viewport.w - 16.);
-                let anchor = self
-                    .pivot_previous_rect(&n)
-                    .filter(|r| r.contains(self.pointer))
-                    .unwrap_or(n.bounds);
+                let anchor = n.bounds;
                 let r = Rect::new(
                     anchor.x.min(self.viewport.w - w - 8.).max(8.),
                     (anchor.bottom() + 8.).min(self.viewport.h - 40.),
@@ -2153,58 +2320,123 @@ impl Ui {
         self.paint_debug(&mut scene, &theme);
         scene
     }
-    /// Keep the Metro title axis and give cropped predecessors a pointer target.
-    fn pivot_previous_rect(&self, n: &Node) -> Option<Rect> {
-        let Kind::Choice {
-            options,
-            pivot: true,
-            ..
-        } = &n.w.kind
-        else {
-            return None;
+    fn reorder_scroll_speed(&self) -> f32 {
+        let Some(d) = self.drag.as_ref().filter(|d| d.moved) else {
+            return 0.;
         };
-        let active = self.states.get(&n.w.id)?.model as usize;
-        if active == 0 || active >= options.len() {
-            return None;
+        if !self.node(d.id).is_some_and(|n| n.w.reorderable) {
+            return 0.;
         }
-        let size = (if self.touch { 48f32 } else { 40. }).max(40. * self.theme.text_scale);
-        // Reserve the touch-sized lane in both modes. Touch-down may enlarge the
-        // hit area, but must not relocate a chevron the user has already seen.
-        let lane = 48f32.max(48. * self.theme.text_scale);
-        let y = n.bounds.y + (44. * self.theme.text_scale - lane) / 2.;
-        let gutter = Rect::new(n.bounds.x - lane, y, lane, lane);
-        let occupied = self.nodes.iter().any(|other| {
-            other.w.id != n.w.id && !matches!(other.w.kind, Kind::Group | Kind::Custom) && {
-                let intersection = gutter.intersect(other.bounds);
-                intersection.w > 0. && intersection.h > 0.
-            }
-        });
-        let slot = if gutter.x >= self.viewport.x && !occupied {
-            gutter
-        } else {
-            Rect::new((n.bounds.right() - lane).max(n.bounds.x), y, lane, lane)
+        let Some(bounds) = self.scroll_bounds.filter(|r| r.contains(d.start)) else {
+            return 0.;
         };
-        let rect = Rect::new(
-            slot.center().x - size / 2.,
-            slot.center().y - size / 2.,
-            size,
-            size,
-        );
-        Some(rect.intersect(self.viewport).intersect(Rect::new(
-            self.viewport.x,
-            n.clip.y,
-            self.viewport.w,
-            n.clip.h,
-        )))
+        let speed = if self.pointer.y < bounds.y + 40. {
+            -(bounds.y + 40. - self.pointer.y) * 8.
+        } else if self.pointer.y > bounds.bottom() - 40. {
+            (self.pointer.y - (bounds.bottom() - 40.)) * 8.
+        } else {
+            0.
+        };
+        if (speed < 0. && self.scroll.offset <= 0.)
+            || (speed > 0. && self.scroll.offset >= self.scroll.max)
+        {
+            0.
+        } else {
+            speed.clamp(-320., 320.)
+        }
+    }
+    fn reorder_at(&mut self, drag: &mut Drag, p: Point) {
+        let Some(owner) = self.node(drag.id) else {
+            return;
+        };
+        let target = self
+            .nodes
+            .iter()
+            .filter(|n| {
+                n.parent == owner.parent
+                    && n.w.reorderable
+                    && n.w.interactive()
+                    && n.w.id != drag.id
+            })
+            .find(|n| {
+                n.bounds.contains(p) && n.clip.contains(p) && {
+                    let vertical = (n.bounds.center().y - owner.bounds.center().y).abs()
+                        > (n.bounds.center().x - owner.bounds.center().x).abs();
+                    let (point, center, own) = if vertical {
+                        (p.y, n.bounds.center().y, owner.bounds.center().y)
+                    } else {
+                        (p.x, n.bounds.center().x, owner.bounds.center().x)
+                    };
+                    if center > own {
+                        point >= center
+                    } else {
+                        point <= center
+                    }
+                }
+            })
+            .map(|n| n.w.id);
+        if let Some(before) = target
+            && drag.reorder_target != Some(before)
+        {
+            self.events.push(Event::Reorder {
+                item: drag.id,
+                before,
+            });
+        }
+        drag.reorder_target = target;
+    }
+    fn land_reorder(&mut self, drag: &Drag, p: Point) {
+        let from = drag
+            .origin
+            .translate(p.x - drag.start.x, p.y - drag.start.y);
+        if let Some(state) = self.states.get_mut(&drag.id) {
+            state.reorder = Some((
+                from,
+                Tween::new(
+                    0.,
+                    1.,
+                    self.clock.now(),
+                    if self.theme.reduce_motion { 0.1 } else { 0.2 },
+                    Curve::OutExpo,
+                ),
+            ));
+        }
     }
     fn choice_clip(&self, n: &Node) -> Rect {
-        let mut clip = n.clip.intersect(n.bounds);
-        if let Some(previous) = self.pivot_previous_rect(n).filter(|r| r.x >= n.bounds.x) {
-            let lane = 48f32.max(48. * self.theme.text_scale);
-            clip.w =
-                (previous.center().x - lane / 2. - 8. * self.theme.text_scale - clip.x).max(0.);
+        n.clip.intersect(n.bounds)
+    }
+    fn reveal_choice(&mut self, id: Id, index: usize) {
+        let Some(node) = self
+            .node(id)
+            .filter(|n| matches!(n.w.kind, Kind::Choice { .. }))
+        else {
+            return;
+        };
+        let s = self.states.get_mut(&id).unwrap();
+        let target = choice_reveal_offset(
+            &s.choice_widths,
+            index,
+            24. * self.theme.text_scale,
+            node.bounds.w,
+            s.choice_offset.target,
+        );
+        s.choice_offset.retarget(
+            target as f64,
+            self.clock.now(),
+            if self.theme.reduce_motion { 0. } else { 0.18 },
+            Curve::OutExpo,
+        );
+    }
+    fn pan_choice(&mut self, id: Id, delta: f32) {
+        let Some(n) = self.node(id) else { return };
+        let spans = self.choice_spans(&n);
+        if let (Some(first), Some(last)) = (spans.first(), spans.last()) {
+            let max = (last.right() - first.x - n.bounds.w).max(0.);
+            let current = n.bounds.x - first.x;
+            let value = (current + delta).clamp(0., max) as f64;
+            self.states.get_mut(&id).unwrap().choice_offset =
+                Tween::new(value, value, self.clock.now(), 0., Curve::Linear);
         }
-        clip
     }
     fn tooltip_text(&self, n: &Node) -> Option<String> {
         if let Kind::ColorPicker { picker, .. } = &n.w.kind {
@@ -2213,20 +2445,10 @@ impl Ui {
                 .hit(n.bounds, position, self.pointer)
                 .map(|i| picker.schemes[i].description());
         }
-        if self
-            .pivot_previous_rect(n)
-            .is_some_and(|r| r.contains(self.pointer))
-            && let Kind::Choice { options, .. } = &n.w.kind
-        {
-            let active = self.states[&n.w.id].model as usize;
-            return options
-                .get(active - 1)
-                .map(|label| format!("previous: {label}"));
-        }
         n.w.tooltip.clone()
     }
     fn choice_spans(&self, n: &Node) -> Vec<Rect> {
-        let Kind::Choice { pivot, .. } = &n.w.kind else {
+        let Kind::Choice { .. } = &n.w.kind else {
             return vec![];
         };
         let Some(s) = self.states.get(&n.w.id) else {
@@ -2242,19 +2464,9 @@ impl Ui {
                 r
             })
             .collect();
-        if *pivot && !spans.is_empty() {
-            let v = if self.theme.reduce_motion {
-                s.model
-            } else {
-                s.value.sample(self.clock.now()).0
-            }
-            .clamp(0., (spans.len() - 1) as f64);
-            let a = v.floor() as usize;
-            let b = v.ceil() as usize;
-            let offset = spans[a].x + (spans[b].x - spans[a].x) * v.fract() as f32 - n.bounds.x;
-            for r in &mut spans {
-                r.x -= offset;
-            }
+        let offset = s.choice_offset.sample(self.clock.now()).0 as f32;
+        for r in &mut spans {
+            r.x -= offset;
         }
         spans
     }
@@ -2308,6 +2520,14 @@ impl Ui {
         };
         let text_scale = t.text_scale;
         let start = scene.draws.len();
+        let lifted = self
+            .drag
+            .as_ref()
+            .is_some_and(|d| d.id == n.w.id && d.moved)
+            && n.w.reorderable;
+        if lifted {
+            scene.rect(r, t.bg, clip);
+        }
         match &n.w.kind {
             Kind::Group | Kind::Custom => {}
             Kind::Label { role } => {
@@ -2685,7 +2905,7 @@ impl Ui {
                     Rect::new(r.x + inset, r.y + 8., r.w - inset, 28. * text_scale),
                     &n.w.label,
                     TypeRole::Value,
-                    fg.mix(accent, value.clamp(0., 1.) as f32),
+                    fg.mix(t.accent_text(), value.clamp(0., 1.) as f32),
                     clip,
                 );
                 if !subtitle.is_empty() {
@@ -2797,43 +3017,6 @@ impl Ui {
                         clip,
                     );
                 }
-                if let Some(previous) = self.pivot_previous_rect(n) {
-                    let over = previous.contains(self.pointer);
-                    let pressed = self
-                        .drag
-                        .as_ref()
-                        .is_some_and(|d| d.id == n.w.id && previous.contains(d.start));
-                    let size = 20. * text_scale;
-                    let shift = if pressed && !t.reduce_motion {
-                        -4. * press
-                    } else {
-                        0.
-                    };
-                    crate::icons::Icon::CaretLeft.paint(
-                        scene,
-                        Rect::new(
-                            previous.center().x - size / 2. + shift,
-                            previous.center().y - size / 2.,
-                            size,
-                            size,
-                        ),
-                        if disabled {
-                            t.fg3
-                        } else if pressed {
-                            accent
-                        } else if over {
-                            fg
-                        } else {
-                            secondary
-                        },
-                        self.viewport.intersect(Rect::new(
-                            self.viewport.x,
-                            n.clip.y,
-                            self.viewport.w,
-                            n.clip.h,
-                        )),
-                    );
-                }
             }
             Kind::Tile {
                 value: primary,
@@ -2858,21 +3041,60 @@ impl Ui {
                 } else {
                     fg.mix(t.on_accent, pulse)
                 };
+                let compact = r.h < 64. * text_scale;
+                let padding = if compact { 8. } else { 12. };
+                let role = if compact {
+                    TypeRole::Value
+                } else if r.h >= 160. * text_scale {
+                    TypeRole::PixelDisplay
+                } else {
+                    TypeRole::MonoLarge
+                };
+                let (value_bounds, label_bounds) = if compact {
+                    let vw = (value.chars().count() as f32 * 12. * text_scale)
+                        .min((r.w - padding * 2.) * 0.45);
+                    (
+                        Rect::new(
+                            r.x + padding,
+                            r.center().y - 12. * text_scale,
+                            vw,
+                            24. * text_scale,
+                        ),
+                        Rect::new(
+                            r.x + padding + vw + 8.,
+                            r.center().y - 8. * text_scale,
+                            (r.w - padding * 2. - vw - 8.).max(0.),
+                            16. * text_scale,
+                        ),
+                    )
+                } else {
+                    let label_y = r.bottom() - 24. * text_scale;
+                    (
+                        Rect::new(
+                            r.x + padding,
+                            r.y + 8.,
+                            (r.w - padding * 2.).max(0.),
+                            (label_y - 8. - (r.y + 8.))
+                                .max(0.)
+                                .min(role.style().line * text_scale),
+                        ),
+                        Rect::new(
+                            r.x + padding,
+                            label_y,
+                            (r.w - padding * 2.).max(0.),
+                            16. * text_scale,
+                        ),
+                    )
+                };
+                scene.text(value_bounds, value, role, c, clip);
                 scene.text(
-                    Rect::new(r.x + 12., r.y + 8., r.w - 24., 72. * text_scale),
-                    value,
-                    if r.h >= 160. {
-                        TypeRole::PixelDisplay
-                    } else {
-                        TypeRole::MonoLarge
-                    },
-                    c,
-                    clip,
-                );
-                scene.text(
-                    Rect::new(r.x + 12., r.bottom() - 28., r.w - 24., 20. * text_scale),
+                    label_bounds,
                     &n.w.label,
-                    TypeRole::Label,
+                    if compact {
+                        TypeRole::Caption
+                    } else {
+                        TypeRole::Label
+                    },
                     if *active { c } else { secondary },
                     clip,
                 );
@@ -3055,15 +3277,22 @@ impl Ui {
                 Kind::Button { .. } | Kind::Tile { .. } | Kind::ListItem { .. }
             )
         {
-            let mut transform = crate::animation::tilt(self.pointer, r, press);
-            if self
-                .drag
-                .as_ref()
-                .is_some_and(|d| d.id == n.w.id && d.moved)
-                && matches!(n.w.kind, Kind::ListItem { .. })
-            {
-                transform.scale = 1.02;
-            }
+            let strength = if n.w.reorderable {
+                0.25
+            } else if matches!(n.w.kind, Kind::Tile { .. }) {
+                0.5
+            } else {
+                1.
+            };
+            let transform = crate::animation::tilt(
+                self.pointer,
+                r,
+                if lifted || s.reorder.is_some_and(|(_, tween)| tween.active(now)) {
+                    0.
+                } else {
+                    press * strength
+                },
+            );
             scene.transform_since(start, transform, r.center());
         }
         if matches!(n.w.kind, Kind::Tile { .. }) {
@@ -3083,7 +3312,7 @@ impl Ui {
             for draw in &mut scene.draws[start..] {
                 draw.transform.opacity *= f;
                 if !t.reduce_motion {
-                    draw.transform.rotate_x += -60. * (1. - f);
+                    draw.transform.rotate_x += -12. * (1. - f);
                     draw.transform.y += 20. * (1. - f);
                 }
                 if live >= 0. && live < if t.reduce_motion { 0.1 } else { 0.4 } {
@@ -3099,7 +3328,17 @@ impl Ui {
                 }
             }
         }
-        if let Some((from, tween)) = s.reorder.filter(|(_, tween)| tween.active(now)) {
+        if lifted {
+            let d = self.drag.as_ref().unwrap();
+            scene.stroke(r, 1., t.line_strong, clip);
+            for draw in &mut scene.draws[start..] {
+                draw.transform.x += d.origin.x + self.pointer.x - d.start.x - r.x;
+                draw.transform.y += d.origin.y + self.pointer.y - d.start.y - r.y;
+                draw.transform.rotate_x = 0.;
+                draw.transform.rotate_y = 0.;
+                draw.transform.scale = 1.;
+            }
+        } else if let Some((from, tween)) = s.reorder.filter(|(_, tween)| tween.active(now)) {
             let f = tween.sample(now).0 as f32;
             for draw in &mut scene.draws[start..] {
                 if t.reduce_motion {
@@ -3218,9 +3457,9 @@ impl Ui {
                 text,
                 TypeRole::Value,
                 if i == selected && closing.is_none() {
-                    t.fg.mix(t.accent, alpha)
+                    t.fg.mix(t.accent_text(), alpha)
                 } else {
-                    if i == selected { t.accent } else { t.fg }.alpha(alpha)
+                    if i == selected { t.accent_text() } else { t.fg }.alpha(alpha)
                 },
                 panel,
             );
@@ -3237,7 +3476,7 @@ impl Ui {
         {
             // Carry the chosen text into the closed value. The underlying copy is
             // suppressed until this lands, avoiding double labels and a final pop.
-            let color = t.fg.mix(t.accent, c.opacity).mix(t.fg, progress);
+            let color = t.fg.mix(t.accent_text(), c.opacity).mix(t.fg, progress);
             scene.text(
                 source.lerp(closed_value, progress),
                 text,
@@ -3290,7 +3529,11 @@ impl Ui {
                         r.inset(8.),
                         label,
                         TypeRole::Heading,
-                        if i == p.selected { t.accent } else { t.fg },
+                        if i == p.selected {
+                            t.accent_text()
+                        } else {
+                            t.fg
+                        },
                         b,
                     );
                 }
@@ -3320,7 +3563,11 @@ impl Ui {
                         r.inset(8.),
                         text,
                         TypeRole::Body,
-                        if p.selected == i { t.accent } else { t.fg },
+                        if p.selected == i {
+                            t.accent_text()
+                        } else {
+                            t.fg
+                        },
                         self.viewport,
                     );
                     if p.selected == i && self.keyboard_focus {
@@ -3334,7 +3581,11 @@ impl Ui {
                         Rect::new(r.x + 12., r.y + 8., r.w - 24., 20.),
                         text,
                         TypeRole::Body,
-                        if p.selected == i { t.accent } else { t.fg },
+                        if p.selected == i {
+                            t.accent_text()
+                        } else {
+                            t.fg
+                        },
                         self.viewport,
                     );
                 }
@@ -3363,7 +3614,11 @@ impl Ui {
                         } else {
                             TypeRole::Value
                         },
-                        if *selected == i { t.accent } else { t.fg },
+                        if *selected == i {
+                            t.accent_text()
+                        } else {
+                            t.fg
+                        },
                         b,
                     );
                     if self.keyboard_focus && p.selected == i {
@@ -3596,27 +3851,6 @@ impl Ui {
                             tabs.push(id);
                             result.push((id, tab));
                         }
-                        if let Some(r) = self.pivot_previous_rect(item) {
-                            let id = pivot_previous_accessibility_id(w.id);
-                            let mut previous = ANode::new(Role::Button);
-                            previous.set_label(format!(
-                                "previous: {}",
-                                options[(s.model as usize) - 1]
-                            ));
-                            previous.set_bounds(accesskit::Rect::new(
-                                r.x as f64 * scale,
-                                r.y as f64 * scale,
-                                r.right() as f64 * scale,
-                                r.bottom() as f64 * scale,
-                            ));
-                            if w.disabled {
-                                previous.set_disabled();
-                            } else {
-                                previous.add_action(Action::Click);
-                            }
-                            tabs.push(id);
-                            result.push((id, previous));
-                        }
                         n.set_children(tabs);
                     }
                     Kind::ListItem { selected, .. } => n.set_selected(*selected),
@@ -3660,22 +3894,6 @@ impl Ui {
                         modifiers: Modifiers::default(),
                     });
                 }
-            }
-            return;
-        }
-        let previous = self
-            .nodes
-            .iter()
-            .filter(|n| n.w.interactive())
-            .find(|n| {
-                self.pivot_previous_rect(n).is_some()
-                    && pivot_previous_accessibility_id(n.w.id) == request.target_node
-            })
-            .map(|n| n.w.id);
-        if let Some(owner) = previous {
-            if request.action == Action::Click {
-                let index = (self.states[&owner].model as usize).saturating_sub(1);
-                self.change(owner, Value::Selection(index), true);
             }
             return;
         }
@@ -3803,6 +4021,27 @@ fn picker_value_rect(bounds: Rect, scale: f32) -> Rect {
     )
 }
 
-fn pivot_previous_accessibility_id(owner: Id) -> accesskit::NodeId {
-    accesskit::NodeId(Id::from(format!("brockmann-pivot-previous-{}", owner.0).as_str()).0)
+fn choice_reveal_offset(
+    widths: &[f32],
+    index: usize,
+    gap: f32,
+    viewport: f32,
+    current: f64,
+) -> f32 {
+    if widths.is_empty() {
+        return 0.;
+    }
+    let index = index.min(widths.len() - 1);
+    let left = widths[..index].iter().sum::<f32>() + gap * index as f32;
+    let right = left + widths[index];
+    let total = widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32;
+    let current = current as f32;
+    let target = if left < current {
+        left
+    } else if right > current + viewport {
+        right - viewport
+    } else {
+        current
+    };
+    target.clamp(0., (total - viewport).max(0.))
 }

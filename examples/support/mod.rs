@@ -3,6 +3,11 @@ use brockmann::{
     render::RenderOptions,
     ui::{Key, Modifiers},
 };
+pub struct SnapshotView<'a> {
+    pub viewport: Rect,
+    pub scroll: f32,
+    pub drag: Option<(&'a str, &'a str)>,
+}
 pub async fn snapshot(
     app: &mut impl Application,
     path: &str,
@@ -10,9 +15,15 @@ pub async fn snapshot(
     open_picker: Option<&str>,
     hover_picker: Option<&str>,
     picker_phase: Option<&str>,
-    view: Option<(Rect, f32)>,
+    view: Option<SnapshotView<'_>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (logical, scroll) = view.unwrap_or((Rect::new(0., 0., 1100., 800.), 0.));
+    let view = view.unwrap_or(SnapshotView {
+        viewport: Rect::new(0., 0., 1100., 800.),
+        scroll: 0.,
+        drag: None,
+    });
+    let logical = view.viewport;
+    let scroll = view.scroll;
     let mut ui = Ui::default();
     app.configure(&mut ui);
     ui.reconcile(app.view(logical), logical);
@@ -79,6 +90,29 @@ pub async fn snapshot(
             bounds.y0 as f32 + 4.,
         )));
         ui.advance(0.25);
+    }
+    if let Some((from, to)) = view.drag {
+        let start = ui
+            .widget_geometry(Id::from(from))
+            .ok_or("unknown drag source")?
+            .0
+            .center();
+        let end = ui
+            .widget_geometry(Id::from(to))
+            .ok_or("unknown drag target")?
+            .0
+            .center();
+        ui.input(Input::Down {
+            position: start,
+            button: brockmann::ui::PointerButton::Primary,
+            touch: false,
+        });
+        ui.input(Input::Move(end));
+        for event in ui.drain_events().collect::<Vec<_>>() {
+            app.event(event, &mut ui);
+        }
+        ui.reconcile(app.view(logical), logical);
+        ui.advance(0.08);
     }
     let mut scene = ui.scene();
     app.paint(&ui, &mut scene);

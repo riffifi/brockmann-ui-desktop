@@ -402,13 +402,24 @@ impl<A: Application> ApplicationHandler<HostEvent> for Host<A> {
                     Input::Up(self.cursor)
                 });
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let delta = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y,
-                    MouseScrollDelta::PixelDelta(p) => p.y as f32 / 32.,
-                };
-                self.dispatch(Input::Wheel { delta });
-            }
+            WindowEvent::MouseWheel { delta, phase, .. } => match delta {
+                MouseScrollDelta::LineDelta(x, y) => self.dispatch(Input::Wheel {
+                    delta: if x.abs() > y.abs() { x } else { y },
+                }),
+                MouseScrollDelta::PixelDelta(p) => {
+                    let p = p.to_logical::<f32>(w.window.scale_factor());
+                    let phase = match phase {
+                        TouchPhase::Started => crate::ui::ScrollPhase::Start,
+                        TouchPhase::Moved => crate::ui::ScrollPhase::Move,
+                        TouchPhase::Ended => crate::ui::ScrollPhase::End,
+                        TouchPhase::Cancelled => crate::ui::ScrollPhase::Cancel,
+                    };
+                    self.dispatch(Input::Scroll {
+                        delta: Point::new(p.x, p.y),
+                        phase,
+                    });
+                }
+            },
             WindowEvent::ModifiersChanged(m) => {
                 let m = m.state();
                 self.modifiers = Modifiers {

@@ -72,15 +72,15 @@ Keep options and their ordering stable while open. If backend choices change, re
 
 ## Choice and pivot
 
-Use a segmented choice for two to four short values. Its underline travels between measured labels. Use a pivot for navigation: the active title moves to the main left axis and neighboring titles hint at other sections. Both report zero-based selection indices and support group arrow navigation. A pivot with a predecessor also displays a previous chevron for pointer access, with an accessible name and delayed tooltip. It uses a clear left gutter where available and otherwise reserves a lane at the right edge, while keeping the active title aligned to the left. It is hidden at the first section and inactive when disabled.
+Use a segmented choice for short values; its underline travels between measured labels. Pivots use larger navigation titles. Both keep all labels in place when they fit, and only reveal necessary overflow when selecting an offscreen option. Earlier options remain clickable; there is no back chevron. Wheel, trackpad and pointer dragging pan an overflowing strip. Both report zero-based selection indices and support keyboard arrows and accessible tab options.
 
 Changing a pivot does not automatically replace application content. Update your page model in `event`; call `ui.navigate(back)` before that update when you want the page transition. The demo shows this order.
 
 ## Lists, tiles and readouts
 
-A `Kind::ListItem` exposes selected state and secondary text. The accent selection bar grows from the row center. Pointer reorder and Alt+Up/Down emit `Event::Reorder { item, before }`; the application changes its ordering, and keyed rows animate to their new positions.
+A `Kind::ListItem` exposes selected state and secondary text. The accent selection bar grows from the row center. Mouse drag and Alt+arrow emit `Event::Reorder { item, before }` within the same parent; `before` identifies the target item slot. Update the app order immediately. The captured row follows the pointer without tilt, neighbours reflow over 200 ms, and the row settles on release. Touch holds for 250 ms before dragging; normal swipes scroll. Tiles opt into this behavior with `.reorderable(true)`.
 
-Tiles use flat fill/outline and text hierarchy. `.live_tile(secondary, interval_seconds)` opts into a periodic flip; the interval is at least 0.5 s. A flip does not start while hovered, although one already in flight continues. Tile activation flashes the accent and decays over 300 ms.
+Tiles use flat fill/outline and text hierarchy. Compact tiles use separate value/label columns; larger tiles reserve distinct vertical slots. Set explicit heights for tiles in a horizontal row. `.live_tile(secondary, interval_seconds)` opts into a periodic flip; the interval is at least 0.5 s. A flip does not start while hovered, although one already in flight continues. Tile activation flashes the accent and decays over 300 ms.
 
 Meters display instantaneous data with peak hold. `Kind::Meter { db, vertical }` expects dB; above 0 dB the overload segment uses danger. Progress uses an optional normalized value in `[0, 1]`; `None` produces five traveling squares. Use meters for data, rather than animating backend measurements through UI easing.
 
@@ -92,7 +92,7 @@ Meters display instantaneous data with peak hold. `Kind::Meter { db, vertical }`
 
 ## Known scope
 
-This is an initial toolkit. It does not open audio or MIDI devices, implement a full code editor, provide a ready-made multi-pane scroll manager, or claim measured 144 Hz end-to-end input latency. Real clipboard, IME, screen-reader and compositor behavior needs platform testing. The embedded fonts do not cover every script. See the tests and demo before relying on a behavior in a shipped application.
+This is an initial toolkit. It does not open MIDI devices, implement a full code editor, provide a ready-made multi-pane scroll manager, or claim measured 144 Hz end-to-end input latency. Real clipboard, IME, screen-reader and compositor behavior needs platform testing. The embedded fonts do not cover every script. See the tests and demo before relying on a behavior in a shipped application.
 
 ## Colour picker
 

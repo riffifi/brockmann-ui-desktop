@@ -259,7 +259,7 @@ States:
 
 ### 6.8 Pivot, tabs and segmented choice
 
-- Pivot headers: described in section 5. Switching: headers slide so the new active header lands at the left margin over 280 ms `ease-out-expo`, and its color crossfades `fg-3` to `fg` over 160 ms. Earlier, cropped headers remain reachable by mouse through a quiet **previous chevron** (40 px pointer / 48 px touch target). Place it in a clear left gutter; when space is limited, reserve a lane at the right edge without shifting the active title axis. Give it a tooltip naming the previous section and an accessible action; hide it at the first section. Each nested pivot manages this independently.
+- Pivot headers: preserve every fitting title in place. Selecting a later title must not hide preceding options by moving the active title to the left edge. Overflow pans only enough to reveal the selection; pointer dragging, wheel, trackpad and keyboard navigation expose further titles. No previous chevron. Nested pivots manage their overflow independently.
 - Segmented choice (small sets, 2 to 4 options): a row of `body` text labels with 24 px gaps. The selected label is `fg` with a 2 px `accent` underline; others `fg-2`. The underline **slides** between options over 180 ms and resizes to the new label’s width.
 
 ### 6.9 MIDI learn
@@ -469,7 +469,7 @@ Final check for every screen: remove one element and see if the screen gets wors
 
 ## Colour scheme picker and catalogue
 
-A reusable Windows 8 inspired colour ribbon supports horizontal and vertical orientation, continuous and spaced swatch variants, and zero to three application-defined companion accents per primary colour. Named palettes and hex readouts remain available alongside samples. Paired caret markers sit outside the colour data and animate to selection in 180 ms; programmatic changes follow the shared 240 ms value motion, while reduced motion uses a 100 ms crossfade. Use 48 logical pixel targets along the strip. Overflow follows the selection and remains reachable by wheel, keyboard and accessible radio options. Custom palettes, disabled and empty states are supported. The companions describe content; UI chrome retains one accent.
+A reusable Windows 8 inspired colour ribbon supports horizontal and vertical orientation, continuous and spaced swatch variants, and zero to three application-defined companion accents per primary colour. Named palettes and hex readouts remain available alongside samples. Paired caret markers sit outside the colour data and animate to selection in 180 ms; programmatic changes follow the shared 240 ms value motion, while reduced motion uses a 100 ms crossfade. The legacy ribbon uses dense 24 logical pixel columns with small bright samples on tinted bands, a neutral frame and hollow selection triangles. The swatch variant retains 48 pixel targets for touch use. Overflow follows the selection and remains reachable by wheel, keyboard and accessible radio options. Custom palettes, disabled and empty states are supported. The companions describe content; UI chrome retains one accent.
 
 A separate `showcase` example catalogues all controls, typography (including all five Geist Pixel cuts), palette variants, tiles, meters, overlays, layout and motion. It supports deterministic offscreen snapshots. See `docs/color-picker.md` and `docs/showcase.md` for implementation and usage guidance.
 
@@ -477,3 +477,8 @@ A separate `showcase` example catalogues all controls, typography (including all
 ## Optional interaction sound
 
 Sound is off by default and independent of reduced motion. Essential mode includes switch states and explicit outcomes; subtle mode adds primary action clicks, committed selections and layer transitions. Hover, typing, scrolling, continuous controls, MIDI and background value animation stay silent. A deterministic dry click/pop family uses short envelopes, quiet filtered contact transients and no reverb or spatial movement. Explicit confirmation/rejection must reflect actual application results and retain visible explanations. Semantic requests coalesce and rate-limit without a playback backlog; native device setup and synthesis run off the UI thread, with precomputed samples and fixed voices in the callback. Apps can mute individual widgets or consume feedback into their own audio engine. The showcase includes audition, volume, mode controls, status and WAV export. Acoustic details, research and limitations are in `docs/sound.md`.
+
+
+## Precision scrolling and reorder revision
+
+Trackpad pixel deltas retain platform acceleration and momentum, are converted from physical to logical pixels once, and respect gesture phases. Do not add a second inertia curve to an already accelerated OS stream. Compact tiles give values and labels disjoint text rectangles; larger tile rows set explicit heights. Reorderable rows and opt-in tiles stay flat and follow the pointer, emit live sibling-slot reorder events at midpoint crossings, animate displaced siblings for 200 ms, and settle on release. A 250 ms touch hold distinguishes reorder from ordinary scrolling. Precise scrolling, overflow navigation and accessible options remain available independently of sound preferences.
