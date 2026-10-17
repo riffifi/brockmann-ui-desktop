@@ -1,0 +1,10 @@
+# Copy to brockmann.local.toml for debug hot reload.
+light = false
+accent = "teal"
+reduce_motion = false
+tilt = true
+text_scale = 1.0
+
+# Absolute logical rectangles, selected by widget key or label.
+# [layout]
+# settings = [320, 160, 640, 480]
