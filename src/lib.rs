@@ -5,6 +5,7 @@
 //! and animation state for surviving keys; an application owns its domain state.
 //! All geometry is in logical pixels. [`Renderer`] performs physical pixel snapping.
 pub mod animation;
+pub mod color_picker;
 pub mod geometry;
 pub mod icons;
 pub mod layout;
@@ -15,6 +16,7 @@ pub mod text;
 pub mod theme;
 pub mod ui;
 pub mod widget;
+pub use color_picker::{ColorPicker, ColorPickerVariant, ColorScheme, CompanionCount, Orientation};
 pub use geometry::{Point, Rect};
 pub use render::Renderer;
 pub use runtime::{Application, InputSender, run};

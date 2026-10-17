@@ -465,3 +465,10 @@ Behavior-level requirements only; Codex chooses the implementation.
 9. **Demo app**: the settings screen from 10.3, then a stub of the drum synth screen.
 
 Final check for every screen: remove one element and see if the screen gets worse. If not, leave it removed.
+
+
+## Colour scheme picker and catalogue
+
+A reusable Windows 8 inspired colour ribbon supports horizontal and vertical orientation, continuous and spaced swatch variants, and zero to three application-defined companion accents per primary colour. Named palettes and hex readouts remain available alongside samples. Paired caret markers sit outside the colour data and animate to selection in 180 ms; programmatic changes follow the shared 240 ms value motion, while reduced motion uses a 100 ms crossfade. Use 48 logical pixel targets along the strip. Overflow follows the selection and remains reachable by wheel, keyboard and accessible radio options. Custom palettes, disabled and empty states are supported. The companions describe content; UI chrome retains one accent.
+
+A separate `showcase` example catalogues all controls, typography (including all five Geist Pixel cuts), palette variants, tiles, meters, overlays, layout and motion. It supports deterministic offscreen snapshots. See `docs/color-picker.md` and `docs/showcase.md` for implementation and usage guidance.

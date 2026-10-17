@@ -80,6 +80,10 @@ pub enum Kind {
         icon: Icon,
         expanded: Option<bool>,
     },
+    ColorPicker {
+        picker: crate::ColorPicker,
+        selected: usize,
+    },
     Custom,
 }
 #[derive(Clone, Debug)]
@@ -258,6 +262,21 @@ impl Widget {
         )
         .height(if pivot { 56. } else { 40. })
     }
+    /// A ribbon or swatch palette. Changes emit `Value::Selection` immediately;
+    /// the paired caret markers follow with an interruptible 180 ms transition.
+    pub fn color_picker(
+        id: impl Into<Id>,
+        label: impl Into<String>,
+        picker: crate::ColorPicker,
+        selected: usize,
+    ) -> Self {
+        let selected = selected.min(picker.schemes.len().saturating_sub(1));
+        let vertical = picker.orientation == crate::Orientation::Vertical;
+        let empty = picker.schemes.is_empty();
+        Self::new(id, label, Kind::ColorPicker { picker, selected })
+            .height(if vertical { 360. } else { 96. })
+            .disabled(empty)
+    }
     pub fn at(mut self, bounds: Rect) -> Self {
         self.bounds = Some(bounds);
         self
@@ -337,7 +356,9 @@ impl Widget {
             Kind::ListItem { selected, .. } => u8::from(selected) as f64,
             Kind::Progress { value: Some(value) } => value.clamp(0., 1.) as f64,
             Kind::Slider { value, .. } | Kind::Knob { value, .. } => value,
-            Kind::Choice { selected, .. } | Kind::Picker { selected, .. } => selected as f64,
+            Kind::Choice { selected, .. }
+            | Kind::Picker { selected, .. }
+            | Kind::ColorPicker { selected, .. } => selected as f64,
             _ => 0.,
         }
     }

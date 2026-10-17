@@ -1134,3 +1134,295 @@ fn touching_a_visible_pivot_chevron_does_not_move_its_target() {
         vec![Event::Changed(Id::from("tabs"), Value::Selection(0))]
     );
 }
+
+#[test]
+fn color_picker_hit_targets_and_selection_match_in_all_variants() {
+    for orientation in [Orientation::Horizontal, Orientation::Vertical] {
+        for variant in [ColorPickerVariant::Ribbon, ColorPickerVariant::Swatches] {
+            for count in [
+                CompanionCount::None,
+                CompanionCount::One,
+                CompanionCount::Two,
+                CompanionCount::Three,
+            ] {
+                let bounds = Rect::new(
+                    24.,
+                    24.,
+                    if orientation == Orientation::Vertical {
+                        160.
+                    } else {
+                        480.
+                    },
+                    if orientation == Orientation::Vertical {
+                        480.
+                    } else {
+                        96.
+                    },
+                );
+                let picker = ColorPicker::metro()
+                    .orientation(orientation)
+                    .variant(variant)
+                    .companions(count);
+                let mut ui = Ui::default();
+                ui.reconcile(
+                    Widget::color_picker("palette", "Scheme", picker.clone(), 0).at(bounds),
+                    VIEW,
+                );
+                ui.advance(1.);
+                let cell = picker.cell_bounds(bounds, 0., 3);
+                assert_eq!(
+                    if orientation == Orientation::Vertical {
+                        cell.h
+                    } else {
+                        cell.w
+                    },
+                    48.
+                );
+                down(&mut ui, cell.center().x, cell.center().y);
+                assert_eq!(
+                    events(&mut ui),
+                    vec![Event::Changed(Id::from("palette"), Value::Selection(3))]
+                );
+                // Selection is owned by the app and survives a keyed view rebuild.
+                ui.reconcile(
+                    Widget::color_picker("palette", "Scheme", picker, 3).at(bounds),
+                    VIEW,
+                );
+                ui.input(Input::Up(cell.center()));
+                ui.advance(0.3);
+                let tree = ui.accessibility_tree(1.);
+                assert_eq!(
+                    tree.nodes
+                        .iter()
+                        .filter(|(_, n)| n.role() == accesskit::Role::RadioButton
+                            && n.toggled() == Some(accesskit::Toggled::True))
+                        .count(),
+                    1
+                );
+                assert!(tree.nodes.iter().any(|(_, n)| {
+                    n.label().is_some_and(|s| s.starts_with("emerald #008A00"))
+                        && n.toggled() == Some(accesskit::Toggled::True)
+                }));
+            }
+        }
+    }
+}
+#[test]
+fn color_picker_overflow_keyboard_wheel_and_assistive_selection_reveal_options() {
+    for orientation in [Orientation::Horizontal, Orientation::Vertical] {
+        let bounds = Rect::new(24., 24., 160., 168.);
+        let picker = ColorPicker::metro()
+            .orientation(orientation)
+            .companions(CompanionCount::Three);
+        let mut ui = Ui::default();
+        ui.reconcile(
+            Widget::color_picker("palette", "Scheme", picker.clone(), 0).at(bounds),
+            VIEW,
+        );
+        ui.advance(1.);
+        ui.focus_widget(Id::from("palette"));
+        key(&mut ui, Key::End);
+        assert_eq!(
+            events(&mut ui),
+            vec![Event::Changed(Id::from("palette"), Value::Selection(15))]
+        );
+        ui.advance(0.3);
+        let r = picker.cell_bounds(bounds, 15., 15);
+        assert!(bounds.contains(r.center()));
+        let tree = ui.accessibility_tree(1.);
+        let (id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label().is_some_and(|s| s.starts_with("yellow #E3C800")))
+            .unwrap();
+        assert_eq!(node.role(), accesskit::Role::RadioButton);
+        assert!(node.label().unwrap().contains("companion #FFF29B"));
+        ui.accessibility_action(accesskit::ActionRequest {
+            action: accesskit::Action::Focus,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: *id,
+            data: None,
+        });
+        assert_eq!(
+            events(&mut ui),
+            vec![Event::Changed(Id::from("palette"), Value::Selection(0))]
+        );
+        ui.advance(0.3);
+        ui.input(Input::Move(picker.cell_bounds(bounds, 0., 0).center()));
+        ui.input(Input::Wheel { delta: -1. });
+        assert_eq!(
+            events(&mut ui),
+            vec![Event::Changed(Id::from("palette"), Value::Selection(1))]
+        );
+        key(&mut ui, Key::Home);
+        events(&mut ui);
+        key(&mut ui, Key::Left);
+        assert!(events(&mut ui).is_empty());
+    }
+}
+#[test]
+fn color_picker_drag_selects_without_repeated_events_and_disabled_is_inert() {
+    let bounds = Rect::new(24., 24., 480., 96.);
+    let picker = ColorPicker::metro();
+    let mut ui = Ui::default();
+    ui.reconcile(
+        Widget::color_picker("palette", "Scheme", picker.clone(), 0).at(bounds),
+        VIEW,
+    );
+    ui.advance(1.);
+    let start = picker.cell_bounds(bounds, 0., 0).center();
+    down(&mut ui, start.x, start.y);
+    assert!(events(&mut ui).is_empty());
+    let next = picker.cell_bounds(bounds, 0., 2).center();
+    ui.input(Input::Move(next));
+    assert_eq!(
+        events(&mut ui),
+        vec![Event::Changed(Id::from("palette"), Value::Selection(2))]
+    );
+    ui.input(Input::Move(next));
+    assert!(events(&mut ui).is_empty());
+    ui.input(Input::Up(next));
+    ui.reconcile(
+        Widget::color_picker("palette", "Scheme", picker, 2)
+            .disabled(true)
+            .at(bounds),
+        VIEW,
+    );
+    down(&mut ui, start.x, start.y);
+    key(&mut ui, Key::End);
+    assert!(events(&mut ui).is_empty());
+    let tree = ui.accessibility_tree(1.);
+    assert!(
+        tree.nodes
+            .iter()
+            .filter(|(_, n)| n.role() == accesskit::Role::RadioButton)
+            .all(|(_, n)| n.is_disabled() && !n.supports_action(accesskit::Action::Click))
+    );
+}
+#[test]
+fn color_picker_marker_retargets_without_a_position_jump_and_settles() {
+    let bounds = Rect::new(0., 0., 768., 96.);
+    let picker = ColorPicker::metro();
+    let mut ui = Ui::default();
+    ui.reconcile(
+        Widget::color_picker("palette", "Scheme", picker.clone(), 0).at(bounds),
+        bounds,
+    );
+    ui.advance(1.);
+    ui.focus_widget(Id::from("palette"));
+    key(&mut ui, Key::End);
+    ui.advance(0.04);
+    let markers = |ui: &Ui| {
+        ui.scene()
+            .draws
+            .into_iter()
+            .filter_map(|d| {
+                if let Primitive::Triangle { points, .. } = d.primitive {
+                    Some(points)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = markers(&ui);
+    key(&mut ui, Key::Home);
+    assert_eq!(before, markers(&ui));
+    assert!(ui.needs_frame());
+    ui.advance(1.);
+    let settled = markers(&ui);
+    let mut initial = Ui::default();
+    initial.reconcile(
+        Widget::color_picker("palette", "Scheme", picker, 0).at(bounds),
+        bounds,
+    );
+    initial.advance(1.);
+    assert_eq!(settled, markers(&initial));
+}
+#[test]
+fn color_picker_handles_empty_custom_and_oversized_selection_and_theme_contrast() {
+    let mut ui = Ui::default();
+    ui.reconcile(
+        Widget::color_picker("empty", "Empty", ColorPicker::new(vec![]), usize::MAX),
+        VIEW,
+    );
+    assert!(!ui.scene().draws.is_empty());
+    assert!(events(&mut ui).is_empty());
+    let schemes = ColorPicker::metro().schemes;
+    for scheme in &schemes {
+        for light in [false, true] {
+            let theme = Theme::new(light, Accent::Teal).with_accent(scheme.primary);
+            assert!(theme.on_accent.contrast(theme.accent) >= 4.5);
+        }
+    }
+    let custom = ColorPicker::new(vec![
+        ColorScheme::new("paper", Color::hex(0xffffff)).companions(&[Color::hex(0x202020)]),
+    ])
+    .companions(CompanionCount::Three);
+    ui.reconcile(
+        Widget::color_picker("custom", "Custom", custom, usize::MAX),
+        VIEW,
+    );
+    let tree = ui.accessibility_tree(1.);
+    assert!(tree.nodes.iter().any(
+        |(_, n)| n.label() == Some("paper #FFFFFF, companion #202020")
+            && n.toggled() == Some(accesskit::Toggled::True)
+    ));
+}
+
+#[test]
+fn reduced_motion_color_picker_crossfades_stationary_markers() {
+    let bounds = Rect::new(0., 0., 768., 96.);
+    let theme = Theme {
+        reduce_motion: true,
+        ..Default::default()
+    };
+    let mut ui = Ui::new(theme);
+    ui.reconcile(
+        Widget::color_picker("palette", "Scheme", ColorPicker::metro(), 0).at(bounds),
+        bounds,
+    );
+    ui.advance(1.);
+    ui.focus_widget(Id::from("palette"));
+    key(&mut ui, Key::End);
+    ui.advance(0.04);
+    let a = ui
+        .scene()
+        .draws
+        .into_iter()
+        .filter_map(|d| {
+            if let Primitive::Triangle { points, .. } = d.primitive {
+                Some((points, d.transform.opacity))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    ui.advance(0.02);
+    let b = ui
+        .scene()
+        .draws
+        .into_iter()
+        .filter_map(|d| {
+            if let Primitive::Triangle { points, .. } = d.primitive {
+                Some((points, d.transform.opacity))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(!a.is_empty());
+    assert_eq!(
+        a.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+        b.iter().map(|(p, _)| p).collect::<Vec<_>>()
+    );
+    assert_ne!(a[0].1, b[0].1);
+    ui.advance(0.05);
+    assert!(
+        ui.scene()
+            .draws
+            .iter()
+            .filter(|d| matches!(d.primitive, Primitive::Triangle { .. }))
+            .all(|d| d.transform.opacity == 1.)
+    );
+}

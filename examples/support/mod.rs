@@ -10,12 +10,17 @@ pub async fn snapshot(
     open_picker: Option<&str>,
     hover_picker: Option<&str>,
     picker_phase: Option<&str>,
+    view: Option<(Rect, f32)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let logical = Rect::new(0., 0., 1100., 800.);
+    let (logical, scroll) = view.unwrap_or((Rect::new(0., 0., 1100., 800.), 0.));
     let mut ui = Ui::default();
     app.configure(&mut ui);
     ui.reconcile(app.view(logical), logical);
     ui.advance(1.);
+    if scroll > 0. {
+        ui.scroll.offset = scroll.min(ui.scroll.max);
+        ui.reconcile(app.view(logical), logical);
+    }
     if let Some(key) = open_picker {
         let id = Id::from(key);
         if !ui

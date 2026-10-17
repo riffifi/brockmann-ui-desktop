@@ -385,6 +385,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             option("--open-picker").map(String::as_str),
             option("--hover-picker").map(String::as_str),
             option("--picker-phase").map(String::as_str),
+            None,
         ))
     } else {
         run(demo)

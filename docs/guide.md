@@ -10,6 +10,7 @@ From this checkout:
 
 ```sh
 cargo run --example demo
+cargo run --example showcase
 cargo run --example demo -- --page synth
 cargo run --example demo -- --page editor
 cargo doc --no-deps --open
@@ -216,3 +217,9 @@ BROCKMANN_TRACE_FRAMES=1 cargo run --example demo
 The host renders during animation and sleeps between changes. A focused text caret has timed blink wakeups. Debug configuration polling wakes the CPU without submitting frames when nothing changed. Performance and screen-reader/IME behavior still need validation on your target OS and hardware; a headless render test does not establish input latency.
 
 Read `docs/design-guidelines.md` in the source checkout for composition and interaction guidance, and `docs/components.md` for the control reference and review checklist.
+
+## Colour schemes and the component library
+
+`Widget::color_picker` adds horizontal or vertical ribbons and swatches with zero to three companion accents per scheme. Changes use `Value::Selection`; applications retain ownership of the palette and selected index. See [`color_picker`](crate::color_picker) for the public types and `docs/color-picker.md` in the checkout for examples and interaction guidelines.
+
+Run `cargo run --example showcase` to explore every widget, type role, all five Pixel fonts, variable font weights, overlays, palette variants and motion. See `docs/showcase.md` for page selection and snapshot options.

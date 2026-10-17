@@ -95,3 +95,5 @@ The GPU test checks sRGB output with linear coverage blending, clipping, runtime
 This is an initial toolkit implementation. The provided spec has no reference screenshot, so visual comparison is against its geometry and tokens. A full production code editor and audio synthesis are application concerns. Native screen-reader/IME testing on all three operating systems, cursor restoration under Wayland compositor restrictions, and measured 144 Hz latency still need hardware validation. Optional live-tile flipping and panorama parallax are not enabled in the demo. Clipboard access depends on the desktop clipboard service. Geist-only fallback intentionally cannot cover scripts absent from the bundled fonts.
 
 Fonts retain their SIL OFL license in `assets/fonts/OFL.txt`. Icon sources retain the MIT license in `assets/icons/LICENSE`. See `LICENSE` for toolkit code.
+
+Run the complete interactive component catalogue with `cargo run --example showcase`. It includes colour ribbons and swatches, all controls, typography, overlays and motion examples. See [the showcase guide](docs/showcase.md) and [colour picker usage](docs/color-picker.md).

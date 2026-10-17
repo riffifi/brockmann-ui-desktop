@@ -93,3 +93,9 @@ Meters display instantaneous data with peak hold. `Kind::Meter { db, vertical }`
 ## Known scope
 
 This is an initial toolkit. It does not open audio or MIDI devices, implement a full code editor, provide a ready-made multi-pane scroll manager, or claim measured 144 Hz end-to-end input latency. Real clipboard, IME, screen-reader and compositor behavior needs platform testing. The embedded fonts do not cover every script. See the tests and demo before relying on a behavior in a shipped application.
+
+## Colour picker
+
+`Widget::color_picker(id, label, ColorPicker, selected)` presents named schemes as a ribbon or spaced swatches. `Orientation` chooses horizontal/vertical layout; `CompanionCount` chooses zero through three accent previews. It emits `Value::Selection`, supports pointer scrubbing, wheel, arrows, Home/End, and accessible radio options. Selection markers travel for 180 ms; reduced motion crossfades. See [the colour picker guide](color-picker.md) for complete examples, overflow and theme application.
+
+The [component library app](showcase.md) demonstrates every component interactively.

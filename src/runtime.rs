@@ -51,6 +51,11 @@ pub trait Application {
     }
     fn view(&mut self, viewport: Rect) -> Widget;
     fn event(&mut self, event: Event, ui: &mut Ui);
+    /// Request frames while an application-owned animation is active. Return false
+    /// at rest so the host can sleep. Use `ui.clock` for motion/debug preferences.
+    fn needs_frame(&self, _ui: &Ui) -> bool {
+        false
+    }
     /// Custom widgets use precisely the same rendering and animation primitives.
     fn paint(&mut self, _ui: &Ui, _scene: &mut Scene) {}
 }
@@ -452,7 +457,7 @@ impl<A: Application> ApplicationHandler<HostEvent> for Host<A> {
             self.redraw = true;
         }
         if let Some(w) = &self.window {
-            if self.ui.needs_frame() || self.redraw {
+            if self.ui.needs_frame() || self.app.needs_frame(&self.ui) || self.redraw {
                 w.window.request_redraw();
                 event_loop.set_control_flow(ControlFlow::Wait);
             } else {

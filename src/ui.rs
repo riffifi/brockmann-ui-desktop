@@ -795,7 +795,12 @@ impl Ui {
                         .and_then(|d| self.node(d.id))
                         .is_some_and(|n| {
                             n.w.range().is_some()
-                                || matches!(n.w.kind, Kind::Toggle { .. } | Kind::Input { .. })
+                                || matches!(
+                                    n.w.kind,
+                                    Kind::Toggle { .. }
+                                        | Kind::Input { .. }
+                                        | Kind::ColorPicker { .. }
+                                )
                         });
                     if !range_drag
                         && (self.touch_scrolling
@@ -856,6 +861,14 @@ impl Ui {
                                         * sensitivity)
                                     .clamp(min, max);
                                 self.change(drag.id, Value::Number(v), false);
+                            }
+                            Kind::ColorPicker { ref picker, .. } => {
+                                let position = self.states[&drag.id].value.sample(now).0;
+                                if let Some(i) = picker.hit(n.bounds, position, p)
+                                    && i != self.states[&drag.id].model as usize
+                                {
+                                    self.change(drag.id, Value::Selection(i), true);
+                                }
                             }
                             Kind::Input { .. } => {
                                 let r = input_rect(&n);
@@ -952,6 +965,14 @@ impl Ui {
                                 .clamp(*min, *max);
                             self.change(id, Value::Number(value), false);
                         }
+                    }
+                    Kind::ColorPicker { picker, .. } => {
+                        if let Some(i) = picker.hit(n.bounds, v, p)
+                            && i != self.states[&id].model as usize
+                        {
+                            self.change(id, Value::Selection(i), true);
+                        }
+                        self.touch_start = None;
                     }
                     Kind::Choice { options, .. } => {
                         if self.pivot_previous_rect(&n).is_some_and(|r| r.contains(p)) {
@@ -1094,6 +1115,21 @@ impl Ui {
                 self.touch_velocity = 0.;
             }
             Input::Wheel { delta } => {
+                if let Some(id) = self.hover
+                    && let Some(n) = self.node(id)
+                    && let Kind::ColorPicker { picker, .. } = n.w.kind
+                {
+                    let current = self.states[&id].model as usize;
+                    let next = if delta > 0. {
+                        current.saturating_sub(1)
+                    } else {
+                        (current + 1).min(picker.schemes.len().saturating_sub(1))
+                    };
+                    if delta != 0. && next != current {
+                        self.change(id, Value::Selection(next), true);
+                    }
+                    return;
+                }
                 if let Some(id) = self.hover {
                     if let Some(editor) = self.states.get_mut(&id).and_then(|s| s.editor.as_mut()) {
                         editor.action(
@@ -1255,6 +1291,20 @@ impl Ui {
             };
             if let Some(v) = v {
                 self.change(id, Value::Number(v.clamp(min, max)), false);
+            }
+            return;
+        }
+        if let Kind::ColorPicker { picker, .. } = &n.w.kind {
+            let current = self.states[&id].model as usize;
+            let next = match key {
+                Key::Left | Key::Up => current.saturating_sub(1),
+                Key::Right | Key::Down => (current + 1).min(picker.schemes.len().saturating_sub(1)),
+                Key::Home => 0,
+                Key::End => picker.schemes.len().saturating_sub(1),
+                _ => current,
+            };
+            if next != current {
+                self.change(id, Value::Selection(next), true);
             }
             return;
         }
@@ -1864,6 +1914,13 @@ impl Ui {
             .and_then(|id| self.states.get(&id))
             .is_some_and(|s| s.editor.is_some())
     }
+    /// Resolved bounds and effective clip for custom painting in a keyed tree.
+    pub fn widget_geometry(&self, id: Id) -> Option<(Rect, Rect)> {
+        self.nodes
+            .iter()
+            .find(|n| n.w.id == id)
+            .map(|n| (n.bounds, n.clip))
+    }
     pub fn scene(&self) -> Scene {
         let mut scene = Scene::default();
         let theme = self.current_theme();
@@ -2068,6 +2125,12 @@ impl Ui {
         clip
     }
     fn tooltip_text(&self, n: &Node) -> Option<String> {
+        if let Kind::ColorPicker { picker, .. } = &n.w.kind {
+            let position = self.states[&n.w.id].value.sample(self.clock.now()).0;
+            return picker
+                .hit(n.bounds, position, self.pointer)
+                .map(|i| picker.schemes[i].description());
+        }
         if self
             .pivot_previous_rect(n)
             .is_some_and(|r| r.contains(self.pointer))
@@ -2599,6 +2662,20 @@ impl Ui {
                     TypeRole::Value,
                     fg,
                     clip,
+                );
+            }
+            Kind::ColorPicker { picker, .. } => {
+                picker.paint(
+                    scene,
+                    crate::color_picker::PickerPaint {
+                        bounds: r,
+                        clip,
+                        label: &n.w.label,
+                        position: value,
+                        selected: s.model as usize,
+                        theme: t,
+                        disabled,
+                    },
                 );
             }
             Kind::Choice { options, pivot, .. } => {
@@ -3323,6 +3400,7 @@ impl Ui {
                     Kind::Input { .. } => Role::TextInput,
                     Kind::Picker { .. } => Role::ComboBox,
                     Kind::Choice { .. } => Role::TabList,
+                    Kind::ColorPicker { .. } => Role::RadioGroup,
                     Kind::ListItem { .. } => Role::ListBoxOption,
                     Kind::Meter { .. } => Role::Meter,
                     Kind::Progress { .. } => Role::ProgressIndicator,
@@ -3367,6 +3445,50 @@ impl Ui {
                     }
                     Kind::Picker { options, .. } => {
                         n.set_value(options.get(s.model as usize).cloned().unwrap_or_default());
+                    }
+                    Kind::ColorPicker { picker, .. } => {
+                        let mut options = vec![];
+                        for (i, scheme) in picker.schemes.iter().enumerate() {
+                            let child_id = choice_accessibility_id(w.id, i);
+                            let mut option = ANode::new(Role::RadioButton);
+                            let mut label = scheme.description();
+                            for color in scheme
+                                .companions
+                                .iter()
+                                .take(picker.companions.get())
+                                .flatten()
+                            {
+                                label.push_str(&format!(
+                                    ", companion {}",
+                                    crate::color_picker::hex(*color)
+                                ));
+                            }
+                            option.set_label(label);
+                            option.set_toggled(if i == s.model as usize {
+                                Toggled::True
+                            } else {
+                                Toggled::False
+                            });
+                            let r = picker
+                                .cell_bounds(item.bounds, s.value.sample(self.clock.now()).0, i)
+                                .intersect(item.bounds)
+                                .intersect(item.clip);
+                            option.set_bounds(accesskit::Rect::new(
+                                r.x as f64 * scale,
+                                r.y as f64 * scale,
+                                r.right() as f64 * scale,
+                                r.bottom() as f64 * scale,
+                            ));
+                            if w.disabled {
+                                option.set_disabled();
+                            } else {
+                                option.add_action(Action::Focus);
+                                option.add_action(Action::Click);
+                            }
+                            result.push((child_id, option));
+                            options.push(child_id);
+                        }
+                        n.set_children(options);
                     }
                     Kind::Choice { options, .. } => {
                         let mut tabs = vec![];
@@ -3480,16 +3602,23 @@ impl Ui {
             .iter()
             .filter(|n| n.w.interactive())
             .find_map(|n| {
-                let Kind::Choice { options, .. } = &n.w.kind else {
-                    return None;
+                let count = match &n.w.kind {
+                    Kind::Choice { options, .. } => options.len(),
+                    Kind::ColorPicker { picker, .. } => picker.schemes.len(),
+                    _ => return None,
                 };
-                (0..options.len())
+                (0..count)
                     .find(|i| choice_accessibility_id(n.w.id, *i) == request.target_node)
                     .map(|i| (n.w.id, i))
             });
         if let Some((owner, index)) = choice {
             self.focus_widget(owner);
-            if request.action == Action::Click {
+            if request.action == Action::Click
+                || (request.action == Action::Focus
+                    && self
+                        .node(owner)
+                        .is_some_and(|n| matches!(n.w.kind, Kind::ColorPicker { .. })))
+            {
                 self.change(owner, Value::Selection(index), true);
             }
             return;

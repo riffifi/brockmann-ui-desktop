@@ -90,3 +90,7 @@ Before accepting a view, check:
 - Disabled controls, accessible names and an idle window that stops submitting frames.
 
 Remove decoration that does not help a decision or action. Keep empty space when it clarifies structure.
+
+## Colour scheme content
+
+Colour ribbons are content selectors: their multicolour samples do not relax the single-accent rule for UI chrome. Use paired carets outside samples, named schemes and hex values so selection never relies on hue alone. Companion squares preview application-defined palette roles; keep those meanings stable and show only the roles the user will apply. Preserve 48 pixel targets along the strip and allow overflow rather than compressing targets. Use the ribbon for continuity and swatches for separation, with the same keyboard and accessibility behavior in either orientation. See [colour picker guidelines](color-picker.md).

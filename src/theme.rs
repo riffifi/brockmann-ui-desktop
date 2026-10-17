@@ -133,6 +133,18 @@ impl Theme {
             tilt: true,
         }
     }
+    /// Replace the single chrome accent, preserving readable text on filled controls.
+    pub fn with_accent(mut self, accent: Color) -> Self {
+        self.accent = accent;
+        self.accent_press = accent.mix(Color::hex(0), 0.18);
+        let white = Color::hex(0xffffff);
+        self.on_accent = if white.contrast(accent) >= 4.5 {
+            white
+        } else {
+            Color::hex(0)
+        };
+        self
+    }
     pub fn mix(&self, b: &Self, t: f32) -> Self {
         let mut v = b.clone();
         macro_rules! mix { ($($f:ident),*)=>{$(v.$f=self.$f.mix(b.$f,t);)*}; }
@@ -164,6 +176,10 @@ pub enum TypeRole {
     MonoValue,
     MonoLarge,
     PixelDisplay,
+    PixelCircle,
+    PixelGrid,
+    PixelLine,
+    PixelTriangle,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct TypeStyle {
@@ -186,6 +202,10 @@ impl TypeRole {
             Caption => ("Geist", 11., 16., 400, 0.02),
             MonoValue => ("Geist Mono", 14., 20., 400, 0.),
             MonoLarge => ("Geist Mono", 32., 36., 300, 0.),
+            PixelCircle => ("Geist Pixel Circle", 64., 72., 400, 0.),
+            PixelGrid => ("Geist Pixel Grid", 64., 72., 400, 0.),
+            PixelLine => ("Geist Pixel Line", 64., 72., 400, 0.),
+            PixelTriangle => ("Geist Pixel Triangle", 64., 72., 400, 0.),
             PixelDisplay => ("Geist Pixel Square", 64., 72., 400, 0.),
         };
         TypeStyle {
